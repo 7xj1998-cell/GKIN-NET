@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
+using Font = System.Drawing.Font;
 
 namespace GKIN
 {
