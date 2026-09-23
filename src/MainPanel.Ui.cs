@@ -55,14 +55,14 @@ namespace GKIN
 
         public MainPanel()
         {
-            BackColor = CNen; ForeColor = CChu; Font = new Font("Segoe UI", 8.25f); Dock = DockStyle.Fill;
+            BackColor = CNen; ForeColor = CChu; Font = new System.Drawing.Font("Segoe UI", 8.25f); Dock = DockStyle.Fill;
             var rail = new Panel { Dock = DockStyle.Right, Width = 36, BackColor = CNen };
             string[] tn = { "Ban ve", "So to", "In PDF", "TT" };
             Color[] tc = { CXanh, CTim, CCam, CLuc };
             for (int i = 0; i < 4; i++)
             {
                 int p = i + 1;
-                var b = new Button { Dock = DockStyle.Top, Height = 120, FlatStyle = FlatStyle.Flat, Text = tn[i], ForeColor = CChu, BackColor = Mix(tc[i], i == 0 ? 1 : 0.3), Font = new Font("Segoe UI", 8, FontStyle.Bold) };
+                var b = new Button { Dock = DockStyle.Top, Height = 120, FlatStyle = FlatStyle.Flat, Text = tn[i], ForeColor = CChu, BackColor = Mix(tc[i], i == 0 ? 1 : 0.3), Font = new System.Drawing.Font("Segoe UI", 8, FontStyle.Bold) };
                 b.FlatAppearance.BorderSize = 0;
                 b.Click += (_, __) => ShowPage(p);
                 tabs[i] = b;
