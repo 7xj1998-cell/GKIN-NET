@@ -22,8 +22,8 @@ namespace GKIN
                 Style = PaletteSetStyles.ShowCloseButton
                     | PaletteSetStyles.ShowAutoHideButton
                     | PaletteSetStyles.Snappable,
-                MinimumSize = new System.Drawing.Size(500, 420),
-                Size = new System.Drawing.Size(520, 460),
+                MinimumSize = new System.Drawing.Size(480, 520),
+                Size = new System.Drawing.Size(560, 640),
                 DockEnabled = DockSides.Left | DockSides.Right,
                 KeepFocus = true
             };

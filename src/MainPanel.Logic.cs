@@ -16,42 +16,53 @@ namespace GKIN
     {
         void Build1()
         {
-            var card = Card("Khung tên + bản vẽ cần đóng khung — tự dò", CLuc);
-            pg1.Controls.Add(card);
-
-            Lbl(card, "Khung tên", 8, 29, 94);
-            cboKhung.SetBounds(104, 25, 247, 23); cboKhung.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            var card = Card("Khung tên và bản vẽ cần đóng", CLuc);
+            var grid = Grid();
             cboKhung.SelectedIndexChanged += (_, __) =>
             {
                 if (cboKhung.SelectedItem is FrameInfo f) { _khung = f.Name; _kt = f.Sample; NapTags(f.Sample); CapNhat(); }
             };
-            var tayK = Mini("Chọn ▾"); tayK.SetBounds(356, 25, 62, 23); tayK.Anchor = AnchorStyles.Top | AnchorStyles.Right; tayK.Click += (_, __) => Tay('K');
-            stKt.SetBounds(104, 48, 314, 18); stKt.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            var tayK = Mini("Chọn");
+            tayK.Click += (_, __) => Tay('K');
+            Row(grid, "Khung tên", cboKhung, tayK);
+            Span(grid, stKt);
+            Span(grid, ScanLine(chkBD, txtTLBD, stBd, 'B'));
+            Span(grid, ScanLine(chkTD, txtTLTD, stTd, 'D'));
+            Span(grid, ScanLine(chkTN, txtTLTN, stTn, 'N'));
 
-            RowScan(card, chkBD, txtTLBD, stBd, 69, 'B');
-            RowScan(card, chkTD, txtTLTD, stTd, 93, 'D');
-            RowScan(card, chkTN, txtTLTN, stTn, 117, 'N');
-
-            Lbl(card, "Cắt trắc dọc", 8, 146, 94);
-            cboCat.SetBounds(104, 142, 198, 23); txtKC.SetBounds(307, 142, 70, 23); Lbl(card, "m", 382, 146, 24);
+            Row(grid, "Cách cắt", cboCat);
+            Row(grid, "Khoảng cách (m)", txtKC);
             cboCat.SelectedIndexChanged += (_, __) => { txtKC.Enabled = cboCat.SelectedIndex == 0; CapNhat(); };
-            Lbl(card, "Xếp trắc ngang", 8, 172, 94);
-            cboHuong.SetBounds(104, 168, 314, 23); cboHuong.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "Xuất ra", 8, 198, 94);
-            cboXuat.SetBounds(104, 194, 314, 23); cboXuat.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            chkGop.SetBounds(8, 221, 182, 21); chkAn.SetBounds(205, 221, 190, 21);
+            Row(grid, "Xếp trắc ngang", cboHuong);
+            Row(grid, "Xuất ra", cboXuat);
 
-            var more = Mini("▸  Tùy chọn thêm — file khung mẫu · chồng mí · layer · bãi tờ");
-            more.TextAlign = ContentAlignment.MiddleLeft; more.SetBounds(8, 245, 410, 22); more.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            more.Click += (_, __) => { morePanel.Visible = !morePanel.Visible; more.Text = (morePanel.Visible ? "▾" : "▸") + "  Tùy chọn thêm — file khung mẫu · chồng mí · layer · bãi tờ"; };
+            var flags = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Color.Transparent, Margin = Padding.Empty };
+            chkGop.Margin = new Padding(0, 4, 12, 4);
+            chkAn.Margin = new Padding(0, 4, 0, 4);
+            flags.Controls.AddRange(new Control[] { chkGop, chkAn });
+            Span(grid, flags);
+            hint.SetToolTip(chkAn, "Sau khi tạo tờ Model, hình đã sao chép không in. Không xóa hình gốc.");
+            hint.SetToolTip(cboCat, "Điểm cắt chưa có dữ liệu thì chương trình báo, không tự chia.");
 
-            morePanel.SetBounds(8, 269, 410, 89); morePanel.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(morePanel, "File khung mẫu", 8, 4, 95); txtMau.SetBounds(104, 1, 252, 22); txtMau.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            var mau = Mini("..."); mau.SetBounds(360, 1, 42, 22); mau.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            mau.Click += (_, __) => { using var d = new OpenFileDialog { Filter = "Bản vẽ AutoCAD (*.dwg)|*.dwg|Tất cả tệp|*.*" }; if (d.ShowDialog() == DialogResult.OK) txtMau.Text = d.FileName; };
-            chkChongMi.SetBounds(8, 26, 120, 20); txtChongMi.SetBounds(132, 25, 48, 22);
-            Lbl(morePanel, "Layer khung rải", 193, 29, 102); txtLayer.SetBounds(294, 25, 108, 22); txtLayer.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            chkBaiTo.SetBounds(8, 52, 146, 20); txtBaiTo.SetBounds(157, 51, 48, 22);
+            Span(grid, NewWrap("Tùy chọn", CPhu));
+            var mau = Mini("Chọn file");
+            mau.Click += (_, __) =>
+            {
+                using var d = new OpenFileDialog { Filter = "Bản vẽ AutoCAD (*.dwg)|*.dwg|Tất cả tệp|*.*" };
+                if (d.ShowDialog() == DialogResult.OK) txtMau.Text = d.FileName;
+            };
+            Row(grid, "File khung mẫu", txtMau, mau);
+            hint.SetToolTip(txtMau, "Để trống thì dùng khung đang có trong bản vẽ. File mẫu không bị sửa.");
+
+            Span(grid, chkChongMi);
+            Row(grid, "Giá trị (mm)", txtChongMi);
+            hint.SetToolTip(chkChongMi, "Chỉ cộng khi được chọn. Số nhập là milimét, đổi theo đơn vị bản vẽ.");
+
+            Row(grid, "Layer khung rải", txtLayer);
+            Span(grid, chkBaiTo);
+            Row(grid, "Số tờ mỗi hàng", txtBaiTo);
+            hint.SetToolTip(chkBaiTo, "Chỉ dùng khi xuất MODEL xếp hàng. Tắt thì mỗi loại một hàng.");
+
             void ToggleOptions()
             {
                 txtChongMi.Enabled = chkChongMi.Checked;
@@ -60,102 +71,91 @@ namespace GKIN
             chkChongMi.CheckedChanged += (_, __) => ToggleOptions();
             chkBaiTo.CheckedChanged += (_, __) => ToggleOptions();
             cboXuat.SelectedIndexChanged += (_, __) => ToggleOptions();
-            morePanel.Controls.AddRange(new Control[] { txtMau, mau, chkChongMi, txtChongMi, txtLayer, chkBaiTo, txtBaiTo });
-
-            card.Controls.AddRange(new Control[] { cboKhung, tayK, stKt, chkBD, txtTLBD, stBd, chkTD, txtTLTD, stTd, chkTN, txtTLTN, stTn,
-                cboCat, txtKC, cboHuong, cboXuat, chkGop, chkAn, more, morePanel });
-            card.Resize += (_, __) =>
-            {
-                int w = card.ClientSize.Width;
-                cboKhung.Width = Math.Max(80, w - 176); tayK.Left = w - 70; stKt.Width = w - 112;
-                stBd.Width = stTd.Width = stTn.Width = Math.Max(50, w - 254);
-                foreach (var button in card.Controls.OfType<Button>().Where(x => x.Text == "Tay ▾")) button.Left = w - 66;
-                cboCat.Width = Math.Max(100, w - 224); txtKC.Left = w - 111;
-                cboHuong.Width = cboXuat.Width = w - 112;
-                more.Width = w - 16; morePanel.Width = w - 16;
-                txtMau.Width = Math.Max(60, w - 176); mau.Left = w - 66; txtLayer.Width = Math.Max(60, w - 310);
-            };
+            Place(card, grid);
+            Mount(pg1, card);
             ToggleOptions();
         }
 
         void Build2()
         {
-            var names = Card("Ký hiệu mã + tên tờ từng loại", CTim);
-            names.SetBounds(0, 0, 430, 105); names.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            var fields = Card("Ghi vào thẻ của khung tên — chọn THẺ + KIỂU ĐÁNH", CHong);
-            fields.SetBounds(0, 111, 430, 290); fields.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom;
-            pg2.Controls.AddRange(new Control[] { fields, names });
+            var names = Card("Mã và tên từng loại tờ", CTim);
+            var nameGrid = Grid();
+            nameGrid.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 88);
+            nameGrid.ColumnStyles[2] = new ColumnStyle(SizeType.Percent, 100f);
+            Row(nameGrid, "Bình đồ", preBD, tenBD, CXanh);
+            Row(nameGrid, "Trắc dọc", preTD, tenTD, CVang);
+            Row(nameGrid, "Trắc ngang", preTN, tenTN, CTim);
+            Place(names, nameGrid);
 
-            Pair(names, "Bình đồ", preBD, tenBD, 25, CXanh);
-            Pair(names, "Trắc dọc", preTD, tenTD, 50, CVang);
-            Pair(names, "Trắc ngang", preTN, tenTN, 75, CTim);
-            PairC(fields, "Tờ số", tagSTT, kieuSTT, 27);
-            PairC(fields, "Mã tờ", tagMS, kieuMS, 53);
-            PairC(fields, "Tờ / tổng", tagBVS, kieuBVS, 79);
-            PairC(fields, "Tên tờ", tagTen, kieuTen, 105);
-            PairC(fields, "Tỷ lệ", tagTL, kieuTL, 131);
-            Lbl(fields, "Số bắt đầu", 8, 162, 80); txtSoBD.SetBounds(91, 158, 68, 23);
-            Lbl(fields, "Số chữ số", 178, 162, 78); txtSoCS.SetBounds(257, 158, 161, 23); txtSoCS.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            var note = NewLbl("Theo số tờ lần trước — TĐ 8 tờ · STT 08–15 · MSBV TĐ - 01...TĐ - 08 · BVS 01/08...08/08 · TENBVE = TRẮC DỌC TUYẾN · TYLE = tỷ lệ rải từng loại", CPhu);
-            note.SetBounds(8, 188, 410, 58); note.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right; note.Font = new Font("Segoe UI", 7.25f); note.AutoEllipsis = true;
-            fields.Controls.AddRange(new Control[] { txtSoBD, txtSoCS, note });
-            void ResizeCards()
-            {
-                int w = pg2.ClientSize.Width;
-                names.Width = fields.Width = w;
-                tenBD.Width = tenTD.Width = tenTN.Width = Math.Max(80, w - 177);
-                kieuSTT.Width = kieuMS.Width = kieuBVS.Width = kieuTen.Width = kieuTL.Width = Math.Max(90, w - 210);
-                txtSoCS.Width = Math.Max(50, w - 265); note.Width = Math.Max(120, w - 16);
-                fields.Height = Math.Max(180, pg2.ClientSize.Height - 111);
-            }
-            pg2.Resize += (_, __) => ResizeCards();
-            ResizeCards();
+            var fields = Card("Ghi vào thẻ khung tên", CHong);
+            var fieldGrid = Grid();
+            fieldGrid.ColumnStyles[1] = new ColumnStyle(SizeType.Absolute, 160);
+            fieldGrid.ColumnStyles[2] = new ColumnStyle(SizeType.Percent, 100f);
+            Row(fieldGrid, "Tờ số", tagSTT, kieuSTT);
+            Row(fieldGrid, "Mã tờ", tagMS, kieuMS);
+            Row(fieldGrid, "Tờ / tổng", tagBVS, kieuBVS);
+            Row(fieldGrid, "Tên tờ", tagTen, kieuTen);
+            Row(fieldGrid, "Tỷ lệ", tagTL, kieuTL);
+            Row(fieldGrid, "Số bắt đầu", txtSoBD);
+            Row(fieldGrid, "Số chữ số", txtSoCS);
+            var note = NewWrap("Ví dụ trắc dọc 8 tờ: STT 08–15, MSBV TĐ - 01 đến TĐ - 08, BVS 01/08 đến 08/08. TENBVE lấy tên loại. TYLE lấy tỷ lệ từng loại.", CPhu);
+            Span(fieldGrid, note);
+            Place(fields, fieldGrid);
+            Mount(pg2, names, fields);
         }
 
         void Build3()
         {
-            var card = Card("In PDF — cả bộ thành một file", CCam);
-            pg3.Controls.Add(card);
-            Lbl(card, "Máy in PDF", 8, 29, 96); cboPC3.SetBounds(104, 25, 314, 23); cboPC3.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "Nét in", 8, 55, 96); cboCTB.SetBounds(104, 51, 205, 23); chkRieng.SetBounds(314, 52, 104, 21); chkRieng.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "Nét in BĐ", 24, 81, 80, CXanh); cboCTBBD.SetBounds(104, 77, 314, 23); cboCTBBD.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "Nét in TĐ", 24, 107, 80, CVang); cboCTBTD.SetBounds(104, 103, 314, 23); cboCTBTD.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "Nét in TN", 24, 133, 80, CTim); cboCTBTN.SetBounds(104, 129, 314, 23); cboCTBTN.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "File PDF", 8, 159, 96); txtPDF.SetBounds(104, 155, 267, 23); txtPDF.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            var browse = Mini("..."); browse.SetBounds(376, 155, 42, 23); browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            browse.Click += (_, __) => { using var d = new SaveFileDialog { Filter = "Tệp PDF (*.pdf)|*.pdf", FileName = "Ho-so.pdf" }; if (d.ShowDialog() == DialogResult.OK) txtPDF.Text = d.FileName; };
-            chkBia.SetBounds(8, 183, 68, 21); chkMuc.SetBounds(82, 183, 96, 21); chkTach.SetBounds(185, 183, 155, 21);
-            Lbl(card, "In lại tờ", 8, 214, 96); txtInLai.SetBounds(104, 210, 267, 23); txtInLai.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            var again = Mini("In lại"); again.SetBounds(376, 210, 42, 23); again.Anchor = AnchorStyles.Top | AnchorStyles.Right; again.Click += (_, __) => InPdf(true);
-            var note = NewLbl("Khổ giấy: tự chọn theo cỡ từng tờ (khớp khổ → in 1:1). In lại: nhập 2,5-7.", CPhu);
-            note.SetBounds(8, 239, 410, 35); note.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right; note.Font = new Font("Segoe UI", 7.25f);
-            chkRieng.CheckedChanged += (_, __) => ToggleSeparateCtb();
-            card.Controls.AddRange(new Control[] { cboPC3, cboCTB, chkRieng, cboCTBBD, cboCTBTD, cboCTBTN, txtPDF, browse, chkBia, chkMuc, chkTach, txtInLai, again, note });
-            card.Resize += (_, __) =>
+            var card = Card("In PDF", CCam);
+            var grid = Grid();
+            Row(grid, "Máy in PDF", cboPC3);
+            Row(grid, "Nét in chung", cboCTB);
+            Span(grid, chkRieng);
+            Row(grid, "Nét in BĐ", cboCTBBD, null, CXanh);
+            Row(grid, "Nét in TĐ", cboCTBTD, null, CVang);
+            Row(grid, "Nét in TN", cboCTBTN, null, CTim);
+            var browse = Mini("Chọn file");
+            browse.Click += (_, __) =>
             {
-                int w = card.ClientSize.Width;
-                cboPC3.Width = w - 112;
-                cboCTB.Width = Math.Max(90, w - 219); chkRieng.Left = w - 112;
-                cboCTBBD.Width = cboCTBTD.Width = cboCTBTN.Width = w - 112;
-                txtPDF.Width = txtInLai.Width = Math.Max(80, w - 167); browse.Left = again.Left = w - 50;
-                note.Width = w - 16;
+                using var d = new SaveFileDialog { Filter = "Tệp PDF (*.pdf)|*.pdf", FileName = "Ho-so.pdf" };
+                if (d.ShowDialog() == DialogResult.OK) txtPDF.Text = d.FileName;
             };
+            Row(grid, "File PDF", txtPDF, browse);
+            var parts = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Color.Transparent, Margin = Padding.Empty };
+            chkBia.Margin = new Padding(0, 4, 12, 4);
+            chkMuc.Margin = new Padding(0, 4, 12, 4);
+            chkTach.Margin = new Padding(0, 4, 0, 4);
+            parts.Controls.AddRange(new Control[] { chkBia, chkMuc, chkTach });
+            Span(grid, parts);
+            var again = Mini("In lại");
+            again.Click += (_, __) => InPdf(true);
+            Row(grid, "In lại tờ", txtInLai, again);
+            hint.SetToolTip(txtInLai, "Ví dụ: 2 là tờ 2. 2,5-7 là tờ 2 và từ tờ 5 đến tờ 7. Bấm In lại, không bấm THỰC HIỆN.");
+            Span(grid, NewWrap("Khổ giấy lấy theo từng tờ. Khớp khổ thì in 1:1.", CPhu));
+            chkRieng.CheckedChanged += (_, __) => ToggleSeparateCtb();
+            Place(card, grid);
+            Mount(pg3, card);
             ToggleSeparateCtb();
         }
 
         void Build4()
         {
-            var card = Card("Thông tin", CLuc);
-            pg4.Controls.Add(card);
-            var title = NewLbl("GKIN — Ghép khung, in nhanh", CChu); title.Font = new Font("Segoe UI", 13f, FontStyle.Bold); title.SetBounds(14, 35, 390, 28);
-            var about = NewLbl("Lệnh: GKIN\r\n\r\nB1  Bản vẽ — dò hoặc chọn khung, bình đồ, trắc dọc, trắc ngang.\r\nB2  THỰC HIỆN — tạo bộ tờ trong Model hoặc Layout.\r\nB3  Đánh số tờ — ghi mã, số, tên và tỷ lệ vào khung tên.\r\nB4  In PDF — xuất cả bộ hoặc in lại các tờ đã chọn.\r\n\r\nHỗ trợ AutoCAD 2021–2024 · Unicode tiếng Việt.", CPhu);
-            about.SetBounds(14, 71, 390, 175); about.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            var open = Mini("Mở thư mục xuất PDF"); open.SetBounds(14, 265, 188, 28);
+            var card = Card("Cách dùng", CLuc);
+            var grid = Grid();
+            var title = NewWrap("GKIN — Ghép khung, in nhanh", CChu);
+            title.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
+            Span(grid, title);
+            Span(grid, NewWrap("Gõ GKIN để mở bảng này.\r\n\r\n1. Bản vẽ — bấm Dò lại, hoặc Chọn nếu dò chưa đúng.\r\n2. THỰC HIỆN ở tab Bản vẽ — tạo tờ trong Model hoặc Layout.\r\n3. Đánh số — chọn thẻ khung tên, rồi THỰC HIỆN.\r\n4. In PDF — chọn file, rồi THỰC HIỆN. Nút In chỉ mở tab này.\r\n\r\nAutoCAD 2021–2024. Nên thử trên bản sao của bản vẽ.", CPhu));
+            var open = Mini("Mở thư mục PDF");
             open.Click += (_, __) => OpenOutputFolder();
-            var close = Mini("Đóng panel"); close.SetBounds(210, 265, 194, 28); close.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            var close = Mini("Đóng bảng");
             close.Click += (_, __) => PaletteHost.Hide();
-            card.Controls.AddRange(new Control[] { title, about, open, close });
-            card.Resize += (_, __) => { title.Width = about.Width = card.ClientSize.Width - 28; close.Width = Math.Max(100, card.ClientSize.Width - 224); };
+            var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Color.Transparent, Margin = new Padding(0, 8, 0, 0) };
+            open.Margin = new Padding(0, 0, 8, 0);
+            buttons.Controls.AddRange(new Control[] { open, close });
+            Span(grid, buttons);
+            Place(card, grid);
+            Mount(pg4, card);
         }
 
         void FillCombos()
@@ -547,33 +547,235 @@ namespace GKIN
             int index = combo.FindStringExact(value ?? ""); combo.SelectedIndex = index >= 0 ? index : 0;
         }
 
-        static AccentCard Card(string caption, Color accent) => new AccentCard { Caption = caption, AccentColor = accent, Dock = DockStyle.Fill, Size = new Size(430, 380) };
-        static Label NewLbl(string text, Color color) => new Label { Text = text, ForeColor = color, AutoSize = false, BackColor = Color.Transparent };
-        static TextBox NewTxt(string text) => new TextBox { Text = text, BackColor = CInput, ForeColor = CInputText, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 8.25f) };
-        static ComboBox NewCombo() => new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, BackColor = CInput, ForeColor = CInputText, FlatStyle = FlatStyle.Flat, IntegralHeight = false, Font = new Font("Segoe UI", 8.25f) };
-        static CheckBox NewChk(string text, bool on) => new CheckBox { Text = text, Checked = on, ForeColor = CChu, BackColor = Color.Transparent, AutoSize = false, UseVisualStyleBackColor = false };
-        static void Fill(ComboBox combo, params string[] items) { combo.Items.Clear(); combo.Items.AddRange(items); if (combo.Items.Count > 0) combo.SelectedIndex = 0; }
-        static void Lbl(Control parent, string text, int x, int y, int width, Color? color = null) { var label = NewLbl(text, color ?? CChu); label.SetBounds(x, y, width, 18); parent.Controls.Add(label); }
-        static Button Mini(string text) { var button = new Button { Text = text, BackColor = CCard, ForeColor = CChu, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f), UseVisualStyleBackColor = false }; button.FlatAppearance.BorderColor = Color.FromArgb(72, 91, 108); button.FlatAppearance.BorderSize = 1; return button; }
-        static Button Act(string text, Color background) { var button = Mini(text); button.BackColor = background; button.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold); button.FlatAppearance.BorderSize = 0; return button; }
-
-        void RowScan(Control parent, CheckBox check, TextBox scale, Label state, int y, char type)
+        static AccentCard Card(string caption, Color accent) => new AccentCard
         {
-            check.SetBounds(8, y, 96, 21); scale.SetBounds(104, y, 70, 22); state.SetBounds(180, y + 2, 174, 18); state.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            var button = Mini("Tay ▾"); button.SetBounds(360, y, 58, 22); button.Anchor = AnchorStyles.Top | AnchorStyles.Right; button.Click += (_, __) => Tay(type);
-            parent.Controls.Add(button);
+            Caption = caption,
+            AccentColor = accent,
+            Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+        };
+
+        static Label NewLbl(string text, Color color) => new Label
+        {
+            Text = text,
+            ForeColor = color,
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            UseCompatibleTextRendering = false
+        };
+
+        static TextBox NewTxt(string text) => new TextBox
+        {
+            Text = text,
+            BackColor = CInput,
+            ForeColor = CInputText,
+            BorderStyle = BorderStyle.FixedSingle,
+            Font = new Font("Segoe UI", 9f)
+        };
+
+        static ComboBox NewCombo() => new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            BackColor = CInput,
+            ForeColor = CInputText,
+            FlatStyle = FlatStyle.Flat,
+            IntegralHeight = false,
+            Font = new Font("Segoe UI", 9f)
+        };
+
+        static CheckBox NewChk(string text, bool on) => new CheckBox
+        {
+            Text = text,
+            Checked = on,
+            ForeColor = CChu,
+            BackColor = Color.FromArgb(41, 55, 69),
+            AutoSize = true,
+            FlatStyle = FlatStyle.Standard,
+            UseVisualStyleBackColor = false,
+            Margin = new Padding(0, 4, 8, 4)
+        };
+
+        static void Fill(ComboBox combo, params string[] items)
+        {
+            combo.Items.Clear();
+            combo.Items.AddRange(items);
+            if (combo.Items.Count > 0) combo.SelectedIndex = 0;
         }
 
-        static void Pair(Control parent, string label, TextBox prefix, TextBox name, int y, Color color)
+        static Button Mini(string text)
         {
-            Lbl(parent, label, 8, y + 3, 82, color); prefix.SetBounds(92, y, 72, 22); name.SetBounds(169, y, 249, 22); name.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            parent.Controls.AddRange(new Control[] { prefix, name });
+            var button = new Button
+            {
+                Text = text,
+                BackColor = CCard,
+                ForeColor = CChu,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9f),
+                UseVisualStyleBackColor = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(72, 30),
+                Padding = new Padding(8, 2, 8, 2),
+                Margin = new Padding(8, 4, 0, 4)
+            };
+            button.FlatAppearance.BorderColor = Color.FromArgb(72, 91, 108);
+            button.FlatAppearance.BorderSize = 1;
+            return button;
         }
 
-        static void PairC(Control parent, string label, ComboBox tag, ComboBox mode, int y)
+        static Button Act(string text, Color background)
         {
-            Lbl(parent, label, 8, y + 3, 82); tag.SetBounds(92, y, 105, 23); mode.SetBounds(202, y, 216, 23); mode.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            parent.Controls.AddRange(new Control[] { tag, mode });
+            var button = Mini(text);
+            button.BackColor = background;
+            button.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            button.FlatAppearance.BorderSize = 0;
+            button.MinimumSize = new Size(72, 32);
+            return button;
+        }
+
+        static TableLayoutPanel Grid()
+        {
+            var table = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                Dock = DockStyle.Top,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            return table;
+        }
+
+        static Label NewWrap(string text, Color color)
+        {
+            var label = NewLbl(text, color);
+            label.AutoSize = true;
+            label.MaximumSize = new Size(420, 0);
+            label.Margin = new Padding(0, 4, 0, 4);
+            return label;
+        }
+
+        void Row(TableLayoutPanel table, string label, Control editor, Control tail = null, Color? color = null)
+        {
+            int row = table.RowCount++;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var caption = NewLbl(label, color ?? CChu);
+            caption.AutoSize = true;
+            caption.Anchor = AnchorStyles.Left;
+            caption.Margin = new Padding(0, 8, 10, 4);
+            editor.Margin = new Padding(0, 4, 0, 4);
+            editor.MinimumSize = new Size(40, 28);
+            if (tail == null)
+            {
+                editor.Dock = DockStyle.Fill;
+                table.SetColumnSpan(editor, 2);
+                table.Controls.Add(caption, 0, row);
+                table.Controls.Add(editor, 1, row);
+            }
+            else
+            {
+                editor.Dock = DockStyle.Fill;
+                tail.Dock = DockStyle.Fill;
+                tail.Margin = new Padding(8, 4, 0, 4);
+                table.Controls.Add(caption, 0, row);
+                table.Controls.Add(editor, 1, row);
+                table.Controls.Add(tail, 2, row);
+            }
+        }
+
+        static void Span(TableLayoutPanel table, Control control)
+        {
+            int row = table.RowCount++;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            if (control is Label label)
+            {
+                label.AutoSize = true;
+                label.MaximumSize = new Size(420, 0);
+            }
+            control.Dock = DockStyle.Top;
+            control.Margin = new Padding(0, 2, 0, 2);
+            table.Controls.Add(control, 0, row);
+            table.SetColumnSpan(control, 3);
+        }
+
+        FlowLayoutPanel ScanLine(CheckBox check, TextBox scale, Label state, char kind)
+        {
+            check.Margin = new Padding(0, 6, 8, 4);
+            scale.Width = 84;
+            scale.MinimumSize = new Size(84, 28);
+            scale.MaximumSize = new Size(84, 32);
+            scale.Margin = new Padding(0, 4, 8, 4);
+            state.AutoSize = true;
+            state.MaximumSize = new Size(240, 0);
+            state.Margin = new Padding(0, 8, 8, 4);
+            var button = Mini("Chọn");
+            button.Margin = new Padding(0, 4, 0, 4);
+            button.Click += (_, __) => Tay(kind);
+            var line = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                WrapContents = true,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            line.Controls.AddRange(new Control[] { check, scale, state, button });
+            return line;
+        }
+
+        static void Place(AccentCard card, TableLayoutPanel table)
+        {
+            card.Controls.Add(table);
+            bool busy = false;
+            void Fit()
+            {
+                if (busy) return;
+                busy = true;
+                try
+                {
+                    int inner = Math.Max(220, card.ClientSize.Width - card.Padding.Horizontal);
+                    table.MaximumSize = new Size(inner, 0);
+                    if (Math.Abs(table.Width - inner) > 1) table.Width = inner;
+                    foreach (Control child in table.Controls)
+                    {
+                        if (child is FlowLayoutPanel flow)
+                            flow.MaximumSize = new Size(Math.Max(80, inner), 0);
+                        if (child is Label label && label.AutoSize)
+                            label.MaximumSize = new Size(Math.Max(80, inner), 0);
+                    }
+                    int height = table.GetPreferredSize(new Size(inner, 0)).Height + card.Padding.Vertical + 4;
+                    if (Math.Abs(card.Height - height) > 1) card.Height = Math.Max(64, height);
+                }
+                finally { busy = false; }
+            }
+            card.Resize += (_, __) => Fit();
+            Fit();
+        }
+
+        static void Mount(Panel page, params AccentCard[] cards)
+        {
+            page.Controls.Clear();
+            page.AutoScroll = true;
+            var stack = new Panel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = CNen,
+                Padding = new Padding(6, 6, 6, 8)
+            };
+            for (int i = cards.Length - 1; i >= 0; i--)
+            {
+                cards[i].Dock = DockStyle.Top;
+                stack.Controls.Add(cards[i]);
+                if (i > 0)
+                    stack.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 8, BackColor = CNen });
+            }
+            page.Controls.Add(stack);
         }
     }
 }

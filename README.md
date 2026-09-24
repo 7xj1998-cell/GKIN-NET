@@ -4,7 +4,7 @@ Palette AutoCAD ghép khung, đánh số tờ và in nhanh cho hồ sơ bình đ
 
 ## Tính năng
 
-- Palette WinForms Unicode tiếng Việt với bốn tab chức năng và trạng thái từng nhóm bản vẽ.
+- Bảng tiếng Việt, tab nằm ngang, chữ không bị cắt. Trang dài thì cuộn.
 - Tự dò khung tên, tim tuyến, trắc dọc, trắc ngang; hỗ trợ chọn tay khi cần.
 - Tạo khung trong `MODEL` kèm hình học hoặc tạo từng tờ trong `LAYOUT` với viewport khóa.
 - Ghi đồng loạt `STT`, `MSBV`, `BVS`, `TENBVE`, `TYLE` theo từng loại hoặc nối tiếp cả bộ.

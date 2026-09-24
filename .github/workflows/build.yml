@@ -45,6 +45,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: GKIN ${{ github.ref_name }}
+          generate_release_notes: true
           files: GKIN-APPLOAD.zip
           fail_on_unmatched_files: true
         env:

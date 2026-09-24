@@ -43,10 +43,9 @@ namespace GKIN
         readonly TextBox txtTLBD = NewTxt("1/1000"), txtTLTD = NewTxt("1/1000"), txtTLTN = NewTxt("1/200"), txtKC = NewTxt("350");
         readonly ComboBox cboCat = NewCombo(), cboHuong = NewCombo(), cboXuat = NewCombo();
         readonly CheckBox chkBD = NewChk("Bình đồ", true), chkTD = NewChk("Trắc dọc", true), chkTN = NewChk("Trắc ngang", true);
-        readonly CheckBox chkGop = NewChk("Gộp bình đồ + trắc dọc", false), chkAn = NewChk("Không in hình học sao chép", false);
-        readonly Panel morePanel = new Panel { BackColor = Color.Transparent, Visible = false };
+        readonly CheckBox chkGop = NewChk("Gộp bình đồ + trắc dọc", false), chkAn = NewChk("Không in hình sao chép", false);
         readonly TextBox txtMau = NewTxt(""), txtChongMi = NewTxt("0"), txtLayer = NewTxt("GKIN-KHUNG"), txtBaiTo = NewTxt("4");
-        readonly CheckBox chkChongMi = NewChk("Chồng mí (mm)", false), chkBaiTo = NewChk("Bãi tờ (tờ/bản vẽ)", false);
+        readonly CheckBox chkChongMi = NewChk("Cộng chồng mí", false), chkBaiTo = NewChk("Giới hạn số tờ mỗi hàng", false);
 
         readonly TextBox preBD = NewTxt("BĐ - "), tenBD = NewTxt("BÌNH ĐỒ TUYẾN");
         readonly TextBox preTD = NewTxt("TĐ - "), tenTD = NewTxt("TRẮC DỌC TUYẾN");
@@ -60,81 +59,118 @@ namespace GKIN
         readonly CheckBox chkRieng = NewChk("Nét in riêng", true), chkBia = NewChk("Bìa", false), chkMuc = NewChk("Mục lục", true), chkTach = NewChk("Tách PDF từng loại", false);
         readonly TextBox txtPDF = NewTxt(""), txtInLai = NewTxt("");
 
-        readonly PillLabel pillKhung = NewPill("✓ Khung", CXanh, 64);
-        readonly PillLabel pillBd = NewPill("BĐ 0", CXanh, 68);
-        readonly PillLabel pillTd = NewPill("TĐ 0 dải", CVang, 68);
-        readonly PillLabel pillTn = NewPill("TN 0 lưới", CTim, 72);
-        readonly PillLabel pillDau = NewPill("Đầu bảng 0/0", CVang, 90);
-        readonly PillLabel pillKem = NewPill("Kèm 0", CHong, 58);
+        readonly PillLabel pillKhung = NewPill("Chưa có khung", CXanh);
+        readonly PillLabel pillBd = NewPill("BĐ 0", CXanh);
+        readonly PillLabel pillTd = NewPill("TĐ 0 tờ", CVang);
+        readonly PillLabel pillTn = NewPill("TN 0 lưới", CTim);
+        readonly PillLabel pillDau = NewPill("Đầu bảng 0/0", CVang);
+        readonly PillLabel pillKem = NewPill("Kèm 0", CHong);
         readonly Label status = NewLbl("Sẵn sàng", CPhu);
         readonly Panel pg1 = NewPage(), pg2 = NewPage(), pg3 = NewPage(), pg4 = NewPage();
-        readonly VerticalTabButton[] tabs = new VerticalTabButton[4];
-        readonly Panel footer = new Panel { Dock = DockStyle.Bottom, Height = 76, BackColor = CNen };
+        readonly TabButton[] tabs = new TabButton[4];
+        readonly Panel footer = new Panel { Dock = DockStyle.Bottom, Height = 128, BackColor = CNen };
+        readonly ToolTip hint = new ToolTip { AutoPopDelay = 10000, InitialDelay = 400, ReshowDelay = 200 };
 
         public MainPanel()
         {
             SuspendLayout();
+            AutoScaleMode = AutoScaleMode.None;
             BackColor = CNen;
             ForeColor = CChu;
-            Font = new Font("Segoe UI", 8.25f, FontStyle.Regular, GraphicsUnit.Point);
+            Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
             Dock = DockStyle.Fill;
-            MinimumSize = new Size(500, 420);
-            footer.Size = new Size(440, 76);
+            MinimumSize = new Size(480, 480);
 
-            var rail = new Panel { Dock = DockStyle.Right, Width = 38, BackColor = Color.FromArgb(24, 35, 46), Padding = new Padding(2, 5, 2, 5) };
+            var bar = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 36,
+                WrapContents = false,
+                AutoScroll = true,
+                BackColor = Color.FromArgb(24, 35, 46),
+                Padding = new Padding(4, 3, 4, 0)
+            };
             string[] names = { "Bản vẽ", "Đánh số tờ", "In PDF", "Thông tin" };
             Color[] colors = { CXanh, CTim, CCam, CLuc };
             for (int i = 0; i < tabs.Length; i++)
             {
                 int page = i + 1;
-                var tab = new VerticalTabButton
-                {
-                    Text = names[i], AccentColor = colors[i],
-                    Dock = DockStyle.Top, Height = 96, Margin = new Padding(0)
-                };
+                var tab = new TabButton { Text = names[i], AccentColor = colors[i], Margin = new Padding(0, 0, 4, 0) };
                 tab.Click += (_, __) => ShowPage(page);
                 tabs[i] = tab;
+                bar.Controls.Add(tab);
             }
-            for (int i = tabs.Length - 1; i >= 0; i--) rail.Controls.Add(tabs[i]);
+            hint.SetToolTip(tabs[1], "Ghi số, mã, tên và tỷ lệ vào khung tên.");
 
             var pills = new FlowLayoutPanel
             {
-                Left = 6, Top = 1, Height = 22, Width = 430,
-                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
-                BackColor = Color.Transparent, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty
+                Dock = DockStyle.Top,
+                Height = 56,
+                WrapContents = true,
+                AutoScroll = false,
+                BackColor = Color.Transparent,
+                Padding = new Padding(0),
+                Margin = Padding.Empty
             };
             pills.Controls.AddRange(new Control[] { pillKhung, pillBd, pillTd, pillTn, pillDau, pillKem });
-            status.SetBounds(8, 23, 422, 16);
-            status.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            status.Font = new Font("Segoe UI", 7.25f);
-            var run = Act("▶  THỰC HIỆN", Color.FromArgb(24, 177, 91));
-            var print = Act("In ▸", CCard); print.ForeColor = CCam; print.FlatAppearance.BorderColor = CCam; print.FlatAppearance.BorderSize = 1;
-            var rescan = Act("↻  Dò lại", CCard); rescan.ForeColor = CXanh; rescan.FlatAppearance.BorderColor = CXanh; rescan.FlatAppearance.BorderSize = 1;
-            run.SetBounds(7, 41, 238, 32);
-            print.SetBounds(252, 41, 79, 32);
-            rescan.SetBounds(338, 41, 96, 32);
-            run.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            print.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
-            rescan.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            status.Dock = DockStyle.Top;
+            status.Height = 22;
+            status.AutoEllipsis = true;
+            status.TextAlign = ContentAlignment.MiddleLeft;
+            status.Font = new Font("Segoe UI", 8.25f);
+
+            var actions = new TableLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 36,
+                ColumnCount = 3,
+                RowCount = 1,
+                BackColor = CNen,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            var run = Act("THỰC HIỆN", Color.FromArgb(24, 177, 91));
+            var print = Act("In", CCard);
+            print.ForeColor = CCam;
+            print.FlatAppearance.BorderColor = CCam;
+            print.FlatAppearance.BorderSize = 1;
+            var rescan = Act("Dò lại", CCard);
+            rescan.ForeColor = CXanh;
+            rescan.FlatAppearance.BorderColor = CXanh;
+            rescan.FlatAppearance.BorderSize = 1;
+            run.Dock = DockStyle.Fill;
+            run.Margin = new Padding(0, 0, 6, 0);
+            run.MinimumSize = new Size(120, 32);
+            print.Margin = new Padding(0, 0, 6, 0);
+            rescan.Margin = Padding.Empty;
             run.Click += (_, __) => ThucHien();
             print.Click += (_, __) => ShowPage(3);
             rescan.Click += (_, __) => DoLai();
-            footer.Controls.AddRange(new Control[] { pills, status, run, print, rescan });
+            hint.SetToolTip(print, "Mở tab In PDF. Chưa in ngay.");
+            actions.Controls.Add(run, 0, 0);
+            actions.Controls.Add(print, 1, 0);
+            actions.Controls.Add(rescan, 2, 0);
+            footer.Controls.Add(actions);
+            footer.Controls.Add(status);
+            footer.Controls.Add(pills);
 
             Build1(); Build2(); Build3(); Build4(); FillCombos();
-            var body = new Panel { Dock = DockStyle.Fill, BackColor = CNen, Padding = new Padding(5, 5, 5, 1) };
+            var body = new Panel { Dock = DockStyle.Fill, BackColor = CNen };
             body.Controls.AddRange(new Control[] { pg4, pg3, pg2, pg1 });
             var workspace = new Panel { Dock = DockStyle.Fill, BackColor = CNen };
             workspace.Controls.Add(body);
             workspace.Controls.Add(footer);
             Controls.Add(workspace);
-            Controls.Add(rail);
+            Controls.Add(bar);
             ShowPage(1);
             CapNhat();
             ResumeLayout(true);
         }
 
-        static Panel NewPage() => new Panel { Dock = DockStyle.Fill, BackColor = CNen };
-        static PillLabel NewPill(string text, Color color, int width) => new PillLabel { Text = text, AccentColor = color, Width = width, Margin = new Padding(0, 0, 3, 0) };
+        static Panel NewPage() => new Panel { Dock = DockStyle.Fill, BackColor = CNen, AutoScroll = true };
+        static PillLabel NewPill(string text, Color color) => new PillLabel { Text = text, AccentColor = color };
     }
 }
