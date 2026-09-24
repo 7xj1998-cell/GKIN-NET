@@ -91,8 +91,7 @@ namespace GKIN
                 }
                 try { Autodesk.AutoCAD.Internal.Utils.SetFocusToDwgView(); }
                 catch { }
-                try { doc.Window.Focus(); } catch { }
-                using (doc.Editor.StartUserInteraction(_panel))
+                using (doc.Editor.StartUserInteraction(_panel.Handle))
                 {
                     pick();
                 }
