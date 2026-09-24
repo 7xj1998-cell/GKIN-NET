@@ -28,7 +28,7 @@ namespace GKIN
             PaletteHost.Show();
         }
 
-        [CommandMethod("GKINDO", CommandFlags.Modal)]
+        [CommandMethod("GKINDONET", CommandFlags.Modal)]
         public void Rescan()
         {
             PaletteHost.Ensure();
