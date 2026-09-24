@@ -20,6 +20,7 @@ namespace GKIN
         public int Count;
         public ObjectId Sample;
         public int W, H;
+        public ObjectId Definition;
         internal int Priority;
         public override string ToString() => $"{Name} · {Count} khung · {W}x{H}";
     }
@@ -80,6 +81,23 @@ namespace GKIN
         public static string FmtM(double m) =>
             m >= 1000 ? $"{m / 1000.0:0.000} km" : $"{m:0} m";
 
+        static readonly string[] TitleTags = { "STT", "SOTT", "TENBVE", "TENBV", "TENBANVE", "TENTO", "MSBV", "SBV", "MABV", "MASO", "BVS", "SOBV", "TYLE", "TILE", "TL" };
+
+        static bool IsTitleTag(string tag)
+        {
+            if (string.IsNullOrEmpty(tag)) return false;
+            for (int i = 0; i < TitleTags.Length; i++)
+                if (tag.Equals(TitleTags[i], StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        static string ShortBlockName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "";
+            int bar = name.LastIndexOf('|');
+            return bar >= 0 ? name.Substring(bar + 1) : name;
+        }
+
         public static List<FrameInfo> QuetKhung()
         {
             var map = new Dictionary<string, FrameInfo>(StringComparer.OrdinalIgnoreCase);
@@ -87,52 +105,125 @@ namespace GKIN
             using (Doc.LockDocument())
             using (var tr = Db.TransactionManager.StartTransaction())
             {
-                var bt = (BlockTable)tr.GetObject(Db.BlockTableId, OpenMode.ForRead);
-                var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-                foreach (ObjectId id in ms)
+                RememberDefinitions(Db, tr, map);
+                RememberInserts(Db, tr, map);
+                tr.Commit();
+            }
+            return map.Values.Where(x => x.Priority > 0)
+                .OrderByDescending(x => x.Priority).ThenByDescending(x => x.Count).ThenBy(x => x.Name).ToList();
+        }
+
+        static void RememberDefinitions(Database db, Transaction tr, Dictionary<string, FrameInfo> map)
+        {
+            var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            foreach (ObjectId bid in bt)
+            {
+                var btr = (BlockTableRecord)tr.GetObject(bid, OpenMode.ForRead);
+                int score = DefinitionScore(btr, tr);
+                if (score <= 0) continue;
+                string shortName = ShortBlockName(btr.Name);
+                if (!map.TryGetValue(shortName, out var rec) || score > rec.Priority)
                 {
-                    if (tr.GetObject(id, OpenMode.ForRead) is not BlockReference br) continue;
-                    string nm = EffectiveName(br);
+                    rec ??= new FrameInfo();
+                    rec.Name = shortName;
+                    rec.Priority = score;
+                    rec.Definition = bid;
+                    Extents3d? acc = null;
+                    foreach (ObjectId id in btr)
+                        if (tr.GetObject(id, OpenMode.ForRead, false) is Entity e && e is not AttributeDefinition && TryExtents(e, out Extents3d ext))
+                            acc = Union(acc, ext);
+                    if (acc != null)
+                    {
+                        rec.W = (int)Math.Round(acc.Value.MaxPoint.X - acc.Value.MinPoint.X);
+                        rec.H = (int)Math.Round(acc.Value.MaxPoint.Y - acc.Value.MinPoint.Y);
+                    }
+                    map[shortName] = rec;
+                }
+            }
+        }
+
+        static void RememberInserts(Database db, Transaction tr, Dictionary<string, FrameInfo> map)
+        {
+            var layouts = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+            foreach (DBDictionaryEntry entry in layouts)
+            {
+                var layout = (Layout)tr.GetObject(entry.Value, OpenMode.ForRead);
+                var space = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForRead);
+                foreach (ObjectId id in space)
+                {
+                    if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference br) continue;
                     int priority = FramePriority(br, tr);
                     if (priority <= 0) continue;
+                    string nm = ShortBlockName(EffectiveName(br));
                     if (!map.TryGetValue(nm, out var rec))
                     {
-                        rec = new FrameInfo { Name = nm, Count = 0, Sample = id, Priority = priority };
-                        try
+                        rec = new FrameInfo { Name = nm, Priority = priority };
+                        map[nm] = rec;
+                    }
+                    rec.Count++;
+                    rec.Priority = Math.Max(rec.Priority, priority);
+                    if (rec.Sample.IsNull)
+                    {
+                        rec.Sample = id;
+                        if (TryExtents(br, out Extents3d ext))
                         {
-                            var ext = br.GeometricExtents;
                             rec.W = (int)Math.Round(ext.MaxPoint.X - ext.MinPoint.X);
                             rec.H = (int)Math.Round(ext.MaxPoint.Y - ext.MinPoint.Y);
                         }
-                        catch { }
-                        map[nm] = rec;
                     }
-                    else if (priority > rec.Priority)
-                    {
-                        rec.Priority = priority;
-                        rec.Sample = id;
-                    }
-                    rec.Count++;
+                    if (rec.Definition.IsNull)
+                        rec.Definition = br.IsDynamicBlock ? br.DynamicBlockTableRecord : br.BlockTableRecord;
                 }
-                tr.Commit();
             }
-            return map.Values.OrderByDescending(x => x.Priority).ThenByDescending(x => x.Count).ThenBy(x => x.Name).ToList();
+        }
+
+        static int DefinitionScore(BlockTableRecord btr, Transaction tr)
+        {
+            if (btr.IsLayout || btr.IsAnonymous) return -1;
+            string name = btr.Name ?? "";
+            if (name.Length == 0 || name[0] == '*') return -1;
+            string shortName = ShortBlockName(name);
+            if (shortName.Length == 0 || shortName[0] == '*') return -1;
+            bool xrefRoot = false;
+            try { xrefRoot = btr.IsFromExternalReference && name.IndexOf('|') < 0; }
+            catch { }
+            int att = 0;
+            try
+            {
+                foreach (ObjectId id in btr)
+                    if (tr.GetObject(id, OpenMode.ForRead, false) is AttributeDefinition ad && IsTitleTag(ad.Tag))
+                        att++;
+            }
+            catch { }
+            if (xrefRoot && att == 0) return shortName.IndexOf("KHUNG", StringComparison.OrdinalIgnoreCase) >= 0 ? 1 : 0;
+            int score = 0;
+            if (att > 0) score += 5 + Math.Min(att, 4);
+            if (shortName.IndexOf("KHUNG", StringComparison.OrdinalIgnoreCase) >= 0) score += 3;
+            return score;
         }
 
         static int FramePriority(BlockReference br, Transaction tr)
         {
             string name = EffectiveName(br) ?? "";
-            if (name.StartsWith("*U", StringComparison.OrdinalIgnoreCase)
-                || name.StartsWith("*D", StringComparison.OrdinalIgnoreCase)) return -1;
+            string shortName = ShortBlockName(name);
+            if (shortName.StartsWith("*U", StringComparison.OrdinalIgnoreCase)
+                || shortName.StartsWith("*D", StringComparison.OrdinalIgnoreCase)) return -1;
+            int att = 0;
             foreach (ObjectId id in br.AttributeCollection)
             {
                 if (tr.GetObject(id, OpenMode.ForRead, false) is not AttributeReference attribute) continue;
-                string tag = attribute.Tag ?? "";
-                if (tag.Equals("STT", StringComparison.OrdinalIgnoreCase)
-                    || tag.Equals("TENBVE", StringComparison.OrdinalIgnoreCase)
-                    || tag.Equals("MSBV", StringComparison.OrdinalIgnoreCase)) return 2;
+                if (IsTitleTag(attribute.Tag)) att++;
             }
-            return name.IndexOf("KHUNG", StringComparison.OrdinalIgnoreCase) >= 0 ? 1 : 0;
+            bool xrefRoot = false;
+            try
+            {
+                var btr = (BlockTableRecord)tr.GetObject(br.IsDynamicBlock ? br.DynamicBlockTableRecord : br.BlockTableRecord, OpenMode.ForRead);
+                xrefRoot = btr.IsFromExternalReference && (btr.Name ?? "").IndexOf('|') < 0;
+            }
+            catch { }
+            if (att > 0) return 5 + att;
+            if (xrefRoot) return 0;
+            return shortName.IndexOf("KHUNG", StringComparison.OrdinalIgnoreCase) >= 0 ? 3 : 0;
         }
 
         public static string EffectiveName(BlockReference br)
@@ -344,6 +435,17 @@ namespace GKIN
             return Ed.GetEntity(new PromptEntityOptions("\n" + msg) { AllowNone = false });
         }
 
+        public static PromptPointResult PickPoint(string msg, string keyword)
+        {
+            var opt = new PromptPointOptions("\n" + msg) { AllowNone = true };
+            if (!string.IsNullOrWhiteSpace(keyword))
+            {
+                opt.Keywords.Add(keyword);
+                opt.AppendKeywordsToMessage = true;
+            }
+            return Ed.GetPoint(opt);
+        }
+
         public static List<ObjectId> KhungRai(string name)
         {
             var list = new List<(ObjectId id, double x, double y, double h)>();
@@ -396,17 +498,22 @@ namespace GKIN
         public static List<string> Tags(ObjectId id)
         {
             var tags = new List<string>();
-            if (Db == null || !IsCurrentDatabase(id)) return tags;
+            if (id.IsNull || id.Database == null || !IsCurrentDatabase(id)) return tags;
             using (Doc.LockDocument())
-            using (var tr = Db.TransactionManager.StartTransaction())
+            using (var tr = id.Database.TransactionManager.StartTransaction())
             {
-                if (tr.GetObject(id, OpenMode.ForRead) is BlockReference br && br.AttributeCollection != null)
+                var obj = tr.GetObject(id, OpenMode.ForRead, false);
+                if (obj is BlockReference br && br.AttributeCollection != null)
                 {
                     foreach (ObjectId aid in br.AttributeCollection)
-                    {
                         if (tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar)
                             tags.Add(ar.Tag);
-                    }
+                }
+                else if (obj is BlockTableRecord btr)
+                {
+                    foreach (ObjectId eid in btr)
+                        if (tr.GetObject(eid, OpenMode.ForRead, false) is AttributeDefinition ad && !ad.Constant)
+                            tags.Add(ad.Tag);
                 }
                 tr.Commit();
             }
@@ -514,41 +621,48 @@ namespace GKIN
             {
                 using var source = new Database(false, true);
                 source.ReadDwgFile(file, FileOpenMode.OpenForReadAndAllShare, false, null);
+                try
+                {
+                    var previous = HostApplicationServices.WorkingDatabase;
+                    try
+                    {
+                        HostApplicationServices.WorkingDatabase = source;
+                        source.ResolveXrefs(false, false);
+                    }
+                    finally { HostApplicationServices.WorkingDatabase = previous; }
+                }
+                catch { }
                 ObjectId sourceDefinition = ObjectId.Null;
                 Scale3d scale = new Scale3d(1);
                 double rotation = 0;
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                int bestPriority = 0;
-                double bestArea = 0;
                 using (var sourceTransaction = source.TransactionManager.StartTransaction())
                 {
-                    var table = (BlockTable)sourceTransaction.GetObject(source.BlockTableId, OpenMode.ForRead);
-                    var model = (BlockTableRecord)sourceTransaction.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-                    foreach (ObjectId id in model)
+                    var found = new Dictionary<string, FrameInfo>(StringComparer.OrdinalIgnoreCase);
+                    RememberDefinitions(source, sourceTransaction, found);
+                    RememberInserts(source, sourceTransaction, found);
+                    FrameInfo best = found.Values.OrderByDescending(x => x.Priority).FirstOrDefault();
+                    if (best != null)
                     {
-                        if (sourceTransaction.GetObject(id, OpenMode.ForRead, false) is not BlockReference candidate) continue;
-                        int priority = FramePriority(candidate, sourceTransaction);
-                        if (priority <= 0) continue;
-                        double area = 0;
-                        if (TryExtents(candidate, out Extents3d ext))
-                            area = Math.Abs((ext.MaxPoint.X - ext.MinPoint.X) * (ext.MaxPoint.Y - ext.MinPoint.Y));
-                        if (priority < bestPriority || (priority == bestPriority && area <= bestArea)) continue;
-                        bestPriority = priority;
-                        bestArea = area;
-                        frameName = EffectiveName(candidate);
-                        sourceDefinition = candidate.IsDynamicBlock ? candidate.DynamicBlockTableRecord : candidate.BlockTableRecord;
-                        scale = candidate.ScaleFactors;
-                        rotation = candidate.Rotation;
-                        values.Clear();
-                        foreach (ObjectId attributeId in candidate.AttributeCollection)
-                            if (sourceTransaction.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute)
-                                values[attribute.Tag] = attribute.TextString;
+                        frameName = best.Name;
+                        sourceDefinition = best.Definition;
+                        if (!best.Sample.IsNull
+                            && sourceTransaction.GetObject(best.Sample, OpenMode.ForRead, false) is BlockReference candidate)
+                        {
+                            if (sourceDefinition.IsNull)
+                                sourceDefinition = candidate.IsDynamicBlock ? candidate.DynamicBlockTableRecord : candidate.BlockTableRecord;
+                            scale = candidate.ScaleFactors;
+                            rotation = candidate.Rotation;
+                            foreach (ObjectId attributeId in candidate.AttributeCollection)
+                                if (sourceTransaction.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute)
+                                    values[attribute.Tag] = attribute.TextString;
+                        }
                     }
                     sourceTransaction.Commit();
                 }
                 if (sourceDefinition.IsNull)
                 {
-                    error = "Không thấy block khung có STT, TENBVE, MSBV hoặc tên chứa KHUNG trong file mẫu.";
+                    error = "Không thấy block khung. Cần block tên chứa KHUNG (KHUNGIN, KHUNG CHINH) hoặc thẻ STT, TENBV, SBV, TYLE. File chỉ có nét thì chưa dùng được.";
                     return ObjectId.Null;
                 }
 
@@ -596,10 +710,32 @@ namespace GKIN
             }
         }
 
+        public static ObjectId InsertFrameInstance(ObjectId definitionId)
+        {
+            if (Db == null || definitionId.IsNull || !IsCurrentDatabase(definitionId)) return ObjectId.Null;
+            using (Doc.LockDocument())
+            using (var tr = Db.TransactionManager.StartTransaction())
+            {
+                var bt = (BlockTable)tr.GetObject(Db.BlockTableId, OpenMode.ForRead);
+                var model = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                ObjectId layerId = EnsureLayer("GKIN-TEMPLATE", tr, false);
+                var frame = new BlockReference(Point3d.Origin, definitionId)
+                {
+                    LayerId = layerId,
+                    Visible = false
+                };
+                model.AppendEntity(frame);
+                tr.AddNewlyCreatedDBObject(frame, true);
+                AddAttributes(frame, definitionId, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), tr);
+                tr.Commit();
+                return frame.ObjectId;
+            }
+        }
+
         public static List<ObjectId> CreateModelSheets(
             ObjectId sampleFrame, Extents3d? bd, Extents3d? td, IList<Extents3d> tnItems,
             int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn, bool rowLayout,
-            string layerName, double overlap, int sheetsPerRow, bool hideCopiedGeometry,
+            string layerName, double overlap, int sheetsPerRow, bool hideCopiedGeometry, Point3d? origin,
             out int tdCreated, out string error)
         {
             error = null;
@@ -618,6 +754,7 @@ namespace GKIN
                 return result;
             }
 
+            int skipped = 0;
             using (Doc.LockDocument())
             using (var tr = Db.TransactionManager.StartTransaction())
             {
@@ -630,18 +767,23 @@ namespace GKIN
                     ObjectId layerId = EnsureLayer(layerName, tr);
                     ObjectId hiddenLayerId = hideCopiedGeometry ? EnsureLayer("GKIN-NONPLOT", tr, false) : ObjectId.Null;
 
-                    var sampleExt = sample.GeometricExtents;
+                    if (!TrySampleExtents(sample, tr, out Extents3d sampleExt))
+                    {
+                        error = "Khung mẫu không có kích thước. Block rỗng hoặc xref chưa nạp.";
+                        return result;
+                    }
                     double frameWidth = Math.Max(1.0, sampleExt.MaxPoint.X - sampleExt.MinPoint.X);
                     double frameHeight = Math.Max(1.0, sampleExt.MaxPoint.Y - sampleExt.MinPoint.Y);
                     Extents3d? drawingExt = null;
                     foreach (ObjectId id in model)
                         if (tr.GetObject(id, OpenMode.ForRead, false) is Entity entity && TryExtents(entity, out Extents3d ext)) drawingExt = Union(drawingExt, ext);
 
-                    double startX = (drawingExt?.MaxPoint.X ?? 0) + frameWidth * 0.30;
-                    double startY = drawingExt?.MaxPoint.Y ?? 0;
+                    double startX = origin.HasValue ? origin.Value.X : (drawingExt.HasValue ? drawingExt.Value.MaxPoint.X + frameWidth * 0.30 : frameWidth * 0.30);
+                    double startY = origin.HasValue ? origin.Value.Y : (drawingExt.HasValue ? drawingExt.Value.MaxPoint.Y : 0);
                     int perRow = rowLayout ? Math.Max(1, sheetsPerRow) : Math.Max(1, plans.Count);
                     double gapX = frameWidth * 0.10;
                     double gapY = frameHeight * 0.15;
+                    string sampleName = EffectiveName(sample);
 
                     for (int index = 0; index < plans.Count; index++)
                     {
@@ -661,7 +803,7 @@ namespace GKIN
                         result.Add(frame.ObjectId);
                         if (plans[index].Type == "TD") tdCreated++;
 
-                        Extents3d targetFrame = frame.GeometricExtents;
+                        Extents3d targetFrame = TryExtents(frame, out Extents3d placed) ? placed : new Extents3d(targetMin, targetMin + new Vector3d(frameWidth, frameHeight, 0));
                         double usableWidth = frameWidth * 0.76;
                         double usableHeight = frameHeight * 0.88;
                         double left = targetFrame.MinPoint.X + frameWidth * 0.04;
@@ -695,27 +837,90 @@ namespace GKIN
                             foreach (ObjectId sourceId in sourceIds)
                             {
                                 if (sourceId == sampleFrame || result.Contains(sourceId)) continue;
-                                if (tr.GetObject(sourceId, OpenMode.ForRead, false) is not Entity source || !TryExtents(source, out Extents3d sourceExt) || !Intersects2d(sourceWindow, sourceExt)) continue;
-                                if (source is BlockReference block && string.Equals(EffectiveName(block), EffectiveName(sample), StringComparison.OrdinalIgnoreCase)) continue;
-                                if (source.Clone() is not Entity clone) continue;
-                                clone.TransformBy(transform);
-                                if (!hiddenLayerId.IsNull) clone.LayerId = hiddenLayerId;
-                                model.AppendEntity(clone);
-                                tr.AddNewlyCreatedDBObject(clone, true);
+                                try
+                                {
+                                    if (tr.GetObject(sourceId, OpenMode.ForRead, false) is not Entity source || !TryExtents(source, out Extents3d sourceExt) || !Intersects2d(sourceWindow, sourceExt)) continue;
+                                    if (source is Viewport || source is AttributeDefinition) continue;
+                                    if (source is BlockReference block)
+                                    {
+                                        if (string.Equals(EffectiveName(block), sampleName, StringComparison.OrdinalIgnoreCase)) continue;
+                                        var owner = (BlockTableRecord)tr.GetObject(block.BlockTableRecord, OpenMode.ForRead);
+                                        if (owner.IsFromExternalReference && (owner.Name ?? "").IndexOf('|') < 0) continue;
+                                    }
+                                    if (source.Clone() is not Entity clone) continue;
+                                    clone.TransformBy(transform);
+                                    if (!hiddenLayerId.IsNull) clone.LayerId = hiddenLayerId;
+                                    model.AppendEntity(clone);
+                                    tr.AddNewlyCreatedDBObject(clone, true);
+                                }
+                                catch { skipped++; }
                             }
                         }
                     }
                     tr.Commit();
                     Db.TransactionManager.QueueForGraphicsFlush();
+                    if (skipped > 0)
+                        error = "Đã bỏ qua " + skipped + " đối tượng không sao chép được (xref, viewport hoặc proxy).";
                 }
                 catch (System.Exception ex)
                 {
                     result.Clear();
                     tdCreated = 0;
-                    error = ex.Message;
+                    error = Describe(ex);
                 }
             }
             return result;
+        }
+
+        static bool TrySampleExtents(BlockReference sample, Transaction tr, out Extents3d ext)
+        {
+            if (TryExtents(sample, out ext))
+            {
+                double w = ext.MaxPoint.X - ext.MinPoint.X;
+                double h = ext.MaxPoint.Y - ext.MinPoint.Y;
+                if (w > 1 && h > 1) return true;
+            }
+            try
+            {
+                var def = (BlockTableRecord)tr.GetObject(sample.IsDynamicBlock ? sample.DynamicBlockTableRecord : sample.BlockTableRecord, OpenMode.ForRead);
+                Extents3d? acc = null;
+                foreach (ObjectId id in def)
+                    if (tr.GetObject(id, OpenMode.ForRead, false) is Entity e && e is not AttributeDefinition && TryExtents(e, out Extents3d ee))
+                        acc = Union(acc, ee);
+                if (acc == null) return false;
+                ext = TransformExtents(acc.Value, sample.BlockTransform);
+                return ext.MaxPoint.X - ext.MinPoint.X > 1 && ext.MaxPoint.Y - ext.MinPoint.Y > 1;
+            }
+            catch
+            {
+                ext = default;
+                return false;
+            }
+        }
+
+        static Extents3d TransformExtents(Extents3d source, Matrix3d matrix)
+        {
+            Point3d[] corners =
+            {
+                new Point3d(source.MinPoint.X, source.MinPoint.Y, 0),
+                new Point3d(source.MaxPoint.X, source.MinPoint.Y, 0),
+                new Point3d(source.MinPoint.X, source.MaxPoint.Y, 0),
+                new Point3d(source.MaxPoint.X, source.MaxPoint.Y, 0)
+            };
+            var result = new Extents3d(corners[0].TransformBy(matrix), corners[0].TransformBy(matrix));
+            for (int i = 1; i < corners.Length; i++) result.AddPoint(corners[i].TransformBy(matrix));
+            return result;
+        }
+
+        static string Describe(System.Exception ex)
+        {
+            if (ex is Autodesk.AutoCAD.Runtime.Exception acad)
+            {
+                if (acad.ErrorStatus == ErrorStatus.NotApplicable)
+                    return "eNotApplicable: khung hoặc đối tượng nguồn không dùng được (xref chưa nạp, block rỗng, viewport).";
+                return acad.ErrorStatus.ToString();
+            }
+            return ex.Message;
         }
 
         static ObjectId EnsureLayer(string requestedName, Transaction tr, bool? isPlottable = null)
@@ -905,10 +1110,12 @@ namespace GKIN
                                 };
                                 paper.AppendEntity(frame);
                                 tr.AddNewlyCreatedDBObject(frame, true);
-                                var frameExt = frame.GeometricExtents;
+                                if (!TrySampleExtents(frame, tr, out Extents3d frameExt))
+                                    throw new InvalidOperationException("Khung mẫu không có kích thước.");
                                 frame.TransformBy(Matrix3d.Displacement(Point3d.Origin - frameExt.MinPoint));
                                 AddAttributes(frame, sample, definitionId, tr);
-                                frameExt = frame.GeometricExtents;
+                                if (!TrySampleExtents(frame, tr, out frameExt))
+                                    frameExt = new Extents3d(Point3d.Origin, new Point3d(420, 297, 0));
                                 frameId = frame.ObjectId;
 
                                 double frameWidth = Math.Max(1.0, frameExt.MaxPoint.X - frameExt.MinPoint.X);
@@ -1113,13 +1320,17 @@ namespace GKIN
             {
                 if (tr.GetObject(id, OpenMode.ForRead) is not AttributeDefinition definitionAttribute
                     || definitionAttribute.Constant) continue;
-                var attribute = new AttributeReference();
-                attribute.SetAttributeFromBlock(definitionAttribute, frame.BlockTransform);
-                attribute.TextString = sampleValues != null && sampleValues.TryGetValue(definitionAttribute.Tag, out string value)
-                    ? value
-                    : definitionAttribute.TextString;
-                frame.AttributeCollection.AppendAttribute(attribute);
-                tr.AddNewlyCreatedDBObject(attribute, true);
+                try
+                {
+                    var attribute = new AttributeReference();
+                    attribute.SetAttributeFromBlock(definitionAttribute, frame.BlockTransform);
+                    attribute.TextString = sampleValues != null && sampleValues.TryGetValue(definitionAttribute.Tag, out string value)
+                        ? value
+                        : definitionAttribute.TextString;
+                    frame.AttributeCollection.AppendAttribute(attribute);
+                    tr.AddNewlyCreatedDBObject(attribute, true);
+                }
+                catch { }
             }
         }
 

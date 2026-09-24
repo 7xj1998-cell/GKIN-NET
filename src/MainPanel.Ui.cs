@@ -26,7 +26,7 @@ namespace GKIN
         Database _stateDb;
         List<FrameInfo> _frames = new List<FrameInfo>();
         string _khung;
-        ObjectId _kt, _bd;
+        ObjectId _kt, _bd, _def;
         Extents3d? _bdExt, _tdExt, _tnExt;
         List<Extents3d> _tnItems = new List<Extents3d>();
         List<LayoutSheetInfo> _layoutSheets = new List<LayoutSheetInfo>();

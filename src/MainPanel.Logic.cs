@@ -8,6 +8,7 @@ using System.Windows.Forms;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
 using Font = System.Drawing.Font;
 
 namespace GKIN
@@ -20,7 +21,7 @@ namespace GKIN
             var grid = Grid();
             cboKhung.SelectedIndexChanged += (_, __) =>
             {
-                if (cboKhung.SelectedItem is FrameInfo f) { _khung = f.Name; _kt = f.Sample; NapTags(f.Sample); CapNhat(); }
+                if (cboKhung.SelectedItem is FrameInfo f) { _khung = f.Name; _kt = f.Sample; _def = f.Definition; NapTags(_kt.IsNull ? _def : _kt); CapNhat(); }
             };
             var tayK = Mini("Chọn");
             tayK.Click += (_, __) => Tay('K');
@@ -168,7 +169,7 @@ namespace GKIN
             Fill(kieuBVS, "từng loại → 01/09", "cả bộ", "không ghi");
             Fill(kieuTen, "tên + lý trình từng tờ", "chỉ tên", "không ghi");
             Fill(kieuTL, "ngang; đứng (TĐ tự dò)", "một tỷ lệ", "không ghi");
-            cboXuat.SelectedIndex = 2;
+            cboXuat.SelectedIndex = 1;
         }
 
         public void DoLai()
@@ -178,7 +179,7 @@ namespace GKIN
                 var db = CadEngine.Db;
                 if (db == null) { ResetState(null); Toast("Không có bản vẽ đang mở."); return; }
                 if (!CadEngine.SameDatabase(_stateDb, db)) ResetState(db);
-                _khung = null; _kt = ObjectId.Null; _bd = ObjectId.Null;
+                _khung = null; _kt = ObjectId.Null; _def = ObjectId.Null; _bd = ObjectId.Null;
                 _bdExt = _tdExt = _tnExt = null; _bdLen = 0; _bdEstimated = false;
                 _frames = CadEngine.QuetKhung();
                 cboKhung.Items.Clear();
@@ -186,7 +187,8 @@ namespace GKIN
                 if (_frames.Count > 0)
                 {
                     cboKhung.SelectedIndex = 0;
-                    _khung = _frames[0].Name; _kt = _frames[0].Sample; NapTags(_kt);
+                    _khung = _frames[0].Name; _kt = _frames[0].Sample; _def = _frames[0].Definition;
+                    NapTags(_kt.IsNull ? _def : _kt);
                 }
                 _hasBd = CadEngine.QuetBinhDo(out _bd, out _bdLen, out _bdEstimated);
                 _bdExt = _hasBd ? CadEngine.BBox(_bd) : null;
@@ -213,7 +215,7 @@ namespace GKIN
 
         void ResetState(Database db)
         {
-            _stateDb = db; _frames.Clear(); _khung = null; _kt = ObjectId.Null; _bd = ObjectId.Null;
+            _stateDb = db; _frames.Clear(); _khung = null; _kt = ObjectId.Null; _bd = ObjectId.Null; _def = ObjectId.Null;
             _bdExt = _tdExt = _tnExt = null; _tnItems.Clear(); _layoutSheets.Clear(); _bdLen = 0; _tdN = _tnN = _modelTdSheets = 0;
             _bdEstimated = false; _hasBd = _hasTd = _hasTn = false; cboKhung.Items.Clear(); CapNhat();
         }
@@ -230,14 +232,20 @@ namespace GKIN
         {
             var tags = CadEngine.Tags(id);
             var all = new List<string> { "— (không ghi)" }; all.AddRange(tags);
-            void Set(ComboBox combo, string guess)
+            void Set(ComboBox combo, params string[] guesses)
             {
                 combo.Items.Clear(); foreach (var value in all) combo.Items.Add(value);
                 int index = 0;
-                for (int i = 0; i < tags.Count; i++) if (string.Equals(tags[i], guess, StringComparison.OrdinalIgnoreCase)) index = i + 1;
+                for (int i = 0; i < tags.Count && index == 0; i++)
+                    foreach (var guess in guesses)
+                        if (string.Equals(tags[i], guess, StringComparison.OrdinalIgnoreCase)) { index = i + 1; break; }
                 if (combo.Items.Count > 0) combo.SelectedIndex = index;
             }
-            Set(tagSTT, "STT"); Set(tagMS, "MSBV"); Set(tagBVS, "BVS"); Set(tagTen, "TENBVE"); Set(tagTL, "TYLE");
+            Set(tagSTT, "STT", "SOTT");
+            Set(tagMS, "MSBV", "SBV", "MABV", "MASO");
+            Set(tagBVS, "BVS", "SOBV");
+            Set(tagTen, "TENBVE", "TENBV", "TENBANVE", "TENTO");
+            Set(tagTL, "TYLE", "TILE", "TL");
         }
 
         void CapNhat()
@@ -283,7 +291,7 @@ namespace GKIN
                 using (var tr = CadEngine.Db.TransactionManager.StartTransaction())
                 {
                     var e = tr.GetObject(r.ObjectId, OpenMode.ForRead);
-                    if (loai == 'K' && e is BlockReference br) { _khung = CadEngine.EffectiveName(br); _kt = r.ObjectId; NapTags(_kt); }
+                    if (loai == 'K' && e is BlockReference br) { _khung = CadEngine.EffectiveName(br); _kt = r.ObjectId; _def = br.BlockTableRecord; NapTags(_kt); }
                     else if (loai == 'B' && e is Curve c) { _bd = r.ObjectId; try { _bdExt = c.GeometricExtents; _bdLen = c.GetDistanceAtParameter(c.EndParam); } catch { } _bdEstimated = false; _hasBd = true; }
                     else if (loai == 'D' && e is Entity td) { _hasTd = true; _tdN = Math.Max(1, _tdN); try { _tdExt = CadEngine.Expand(td.GeometricExtents, 0.08, 2.50); } catch { } }
                     else if (e is Entity tn) { _hasTn = true; _tnN = 1; try { var ext = tn.GeometricExtents; _tnItems = new List<Extents3d> { ext }; _tnExt = CadEngine.Expand(ext, 0.12, 0.20); } catch { } }
@@ -301,11 +309,26 @@ namespace GKIN
 
         void DongKhung()
         {
-            if (string.IsNullOrEmpty(_khung) && string.IsNullOrWhiteSpace(txtMau.Text)) { Toast("Chưa có khung tên."); return; }
+            if (string.IsNullOrEmpty(_khung) && _def.IsNull && string.IsNullOrWhiteSpace(txtMau.Text)) { Toast("Chưa có khung tên."); return; }
             if (chkTD.Checked && _hasTd && cboCat.SelectedIndex == 2)
             {
                 Toast("Chưa có điểm cắt trắc dọc; hãy chọn Khoảng cách đều hoặc Theo bề rộng.");
                 return;
+            }
+
+            Point3d? origin = null;
+            if (cboXuat.SelectedIndex != 2)
+            {
+                bool cancel = false;
+                PaletteHost.AllowPick(() =>
+                {
+                    var picked = CadEngine.PickPoint("Chọn góc dưới-trái tờ đầu tiên", "TuDong");
+                    if (picked == null || picked.Status == PromptStatus.Cancel) { cancel = true; return; }
+                    if (picked.Status == PromptStatus.Keyword || picked.Status == PromptStatus.None) return;
+                    if (picked.Status != PromptStatus.OK) { cancel = true; return; }
+                    origin = picked.Value;
+                });
+                if (cancel) { Toast("Đã hủy đặt bản vẽ."); return; }
             }
 
             int ntd = SoToTD();
@@ -317,6 +340,12 @@ namespace GKIN
             {
                 sampleFrame = CadEngine.ImportTemplateFrame(txtMau.Text, out _, out string importError);
                 if (sampleFrame.IsNull) { Toast("Không nạp được file khung mẫu: " + importError); return; }
+                importedSample = true;
+            }
+            else if (sampleFrame.IsNull && !_def.IsNull)
+            {
+                sampleFrame = CadEngine.InsertFrameInstance(_def);
+                if (sampleFrame.IsNull) { Toast("Không chèn được block khung."); return; }
                 importedSample = true;
             }
 
@@ -345,7 +374,7 @@ namespace GKIN
                     : 4;
                 var made = CadEngine.CreateModelSheets(sampleFrame, chkBD.Checked ? _bdExt : null, chkTD.Checked ? _tdExt : null,
                     chkTN.Checked ? _tnItems : null, ntd, tdLength, tdStep, chkGop.Checked, cboHuong.SelectedIndex == 1,
-                    cboXuat.SelectedIndex == 1, txtLayer.Text, overlap, sheetsPerRow, chkAn.Checked,
+                    cboXuat.SelectedIndex == 1, txtLayer.Text, overlap, sheetsPerRow, chkAn.Checked, origin,
                     out _modelTdSheets, out string modelError);
                 _layoutSheets.Clear();
                 if (importedSample && made.Count > 0)

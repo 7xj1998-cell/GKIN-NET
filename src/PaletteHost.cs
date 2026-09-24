@@ -11,6 +11,7 @@ namespace GKIN
         static MainPanel _panel;
         static bool _eventsAttached;
         static bool _picking;
+        static int _skipActivate;
 
         public static MainPanel Panel => _panel;
 
@@ -43,6 +44,7 @@ namespace GKIN
         static void OnDocumentActivated(object sender, DocumentCollectionEventArgs e)
         {
             if (_picking) return;
+            if (_skipActivate > 0) { _skipActivate--; return; }
             _panel?.OnDocumentChanged(e.Document);
         }
 
@@ -95,6 +97,7 @@ namespace GKIN
             }
             finally
             {
+                _skipActivate = 2;
                 _picking = false;
                 if (_ps != null)
                 {
