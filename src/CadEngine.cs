@@ -251,12 +251,249 @@ namespace GKIN
             return br.Name;
         }
 
+        sealed class PathSample
+        {
+            public List<Point3d> Points;
+            public double Length;
+        }
+
+        static string RxName(DBObject obj)
+        {
+            try
+            {
+                if (obj is ProxyEntity proxy && !string.IsNullOrWhiteSpace(proxy.OriginalClassName))
+                    return proxy.OriginalClassName;
+            }
+            catch { }
+            try { return obj.GetRXClass()?.Name ?? obj.GetType().Name; }
+            catch { return obj.GetType().Name; }
+        }
+
+        static bool TryLen(Curve curve, out double length)
+        {
+            try
+            {
+                length = Math.Abs(curve.GetDistanceAtParameter(curve.EndParam) - curve.GetDistanceAtParameter(curve.StartParam));
+                return length > 1;
+            }
+            catch { length = 0; return false; }
+        }
+
+        static bool IsAlignment(Entity ent)
+        {
+            string rx = RxName(ent).ToUpperInvariant();
+            return rx.Contains("ALIGNMENT") || rx.Contains("TDTDBALIGN");
+        }
+
+        static bool IsProfile(Entity ent)
+        {
+            string layer = (ent.Layer ?? "").ToUpperInvariant();
+            string rx = RxName(ent).ToUpperInvariant();
+            if (layer.Contains("PLINETNTN") || layer.Contains("TRACNGANG")) return false;
+            return layer.Contains("PLINETDTN") || layer.Contains("PLINETD") || layer.Contains("TRACDOC")
+                || rx.Contains("TDTDBPOLYLINE");
+        }
+
+        static bool IsSection(Entity ent)
+        {
+            string layer = (ent.Layer ?? "").ToUpperInvariant();
+            if (layer.Contains("PLINETDTN") || layer.Contains("PLINETD") || layer.Contains("TRACDOC") || layer == "TUYEN") return false;
+            return layer.Contains("PLINETNTN") || layer.Contains("PLINETN") || layer.Contains("TRACNGANG")
+                || layer.Contains("MATCAT") || layer.Contains("TCTN");
+        }
+
+        public static double MeasureLength(Entity ent)
+        {
+            var sample = SampleEntity(ent);
+            return sample == null ? 0 : sample.Length;
+        }
+
+        public static bool ExtentsOf(Entity entity, out Extents3d extents) => TryExtents(entity, out extents);
+
+        static PathSample SampleEntity(Entity ent)
+        {
+            if (ent is Curve curve && !(ent is Circle) && TryLen(curve, out double len))
+                return SampleCurve(curve, len);
+            DBObjectCollection bag = null;
+            try
+            {
+                bag = new DBObjectCollection();
+                ent.Explode(bag);
+            }
+            catch { bag = null; }
+            try
+            {
+                if (bag != null && bag.Count > 0)
+                {
+                    Curve longest = null;
+                    double longestLen = 0, sum = 0;
+                    var segs = new List<Point3d[]>();
+                    foreach (DBObject obj in bag)
+                    {
+                        if (obj is not Curve part || !TryLen(part, out double partLen)) continue;
+                        sum += partLen;
+                        if (partLen > longestLen) { longestLen = partLen; longest = part; }
+                        if (part is Line line) segs.Add(new[] { line.StartPoint, line.EndPoint });
+                        else if (part is Polyline pl)
+                        {
+                            var piece = new List<Point3d>();
+                            int n = pl.NumberOfVertices;
+                            for (int i = 0; i < n; i++) piece.Add(pl.GetPoint3dAt(i));
+                            if (piece.Count >= 2) segs.Add(piece.ToArray());
+                        }
+                    }
+                    if (longest != null && longestLen >= sum * 0.45) return SampleCurve(longest, longestLen);
+                    var chained = Chain(segs);
+                    if (chained != null && chained.Length >= longestLen) return chained;
+                    if (longest != null) return SampleCurve(longest, longestLen);
+                }
+            }
+            finally
+            {
+                if (bag != null)
+                    foreach (DBObject obj in bag)
+                        try { obj.Dispose(); } catch { }
+            }
+            try
+            {
+                var grips = new Point3dCollection();
+                ent.GetGripPoints(grips, new IntegerCollection(), new IntegerCollection());
+                if (grips.Count >= 2)
+                {
+                    var pts = new List<Point3d>();
+                    foreach (Point3d p in grips) pts.Add(p);
+                    return OrderPoints(pts);
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        static PathSample SampleCurve(Curve curve, double length)
+        {
+            int n = Math.Max(16, (int)Math.Min(500, Math.Ceiling(length / 10.0)));
+            var pts = new List<Point3d>(n + 1);
+            for (int i = 0; i <= n; i++)
+            {
+                try { pts.Add(curve.GetPointAtDist(Math.Min(length, length * i / n))); }
+                catch { }
+            }
+            if (pts.Count < 2) return null;
+            return new PathSample { Points = pts, Length = length };
+        }
+
+        static PathSample Chain(List<Point3d[]> segs)
+        {
+            if (segs == null || segs.Count == 0) return null;
+            var used = new bool[segs.Count];
+            Point3d end = segs[0][segs[0].Length - 1];
+            int best = 0;
+            double bestDeg = double.MaxValue;
+            for (int i = 0; i < segs.Count; i++)
+            {
+                int deg = 0;
+                Point3d a = segs[i][0];
+                for (int j = 0; j < segs.Count; j++)
+                {
+                    if (i == j) continue;
+                    if (Near(a, segs[j][0], 0.5) || Near(a, segs[j][segs[j].Length - 1], 0.5)) deg++;
+                }
+                if (deg < bestDeg) { bestDeg = deg; best = i; end = a; }
+            }
+            var pts = new List<Point3d>();
+            for (int guard = 0; guard < segs.Count; guard++)
+            {
+                int pick = -1;
+                bool flip = false;
+                double pickDist = 2.0;
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    if (used[i]) continue;
+                    double d0 = Dist2(end, segs[i][0]);
+                    double d1 = Dist2(end, segs[i][segs[i].Length - 1]);
+                    if (d0 <= d1 && d0 < pickDist) { pickDist = d0; pick = i; flip = false; }
+                    else if (d1 < pickDist) { pickDist = d1; pick = i; flip = true; }
+                }
+                if (pick < 0) break;
+                used[pick] = true;
+                var seg = segs[pick];
+                if (flip) Array.Reverse(seg);
+                if (pts.Count == 0) pts.Add(seg[0]);
+                for (int k = 1; k < seg.Length; k++) pts.Add(seg[k]);
+                end = pts[pts.Count - 1];
+            }
+            return pts.Count >= 2 ? Measure(pts) : null;
+        }
+
+        static PathSample OrderPoints(List<Point3d> pts)
+        {
+            if (pts.Count < 2) return null;
+            int start = 0;
+            double far = 0;
+            for (int i = 0; i < pts.Count; i++)
+            {
+                double d = Dist2(pts[i], pts[0]);
+                if (d > far) { far = d; start = i; }
+            }
+            var left = new List<Point3d>(pts);
+            var ordered = new List<Point3d> { left[start] };
+            left.RemoveAt(start);
+            while (left.Count > 0)
+            {
+                int near = 0;
+                double best = double.MaxValue;
+                Point3d tail = ordered[ordered.Count - 1];
+                for (int i = 0; i < left.Count; i++)
+                {
+                    double d = Dist2(tail, left[i]);
+                    if (d < best) { best = d; near = i; }
+                }
+                ordered.Add(left[near]);
+                left.RemoveAt(near);
+            }
+            return Measure(ordered);
+        }
+
+        static PathSample Measure(List<Point3d> pts)
+        {
+            double len = 0;
+            for (int i = 1; i < pts.Count; i++) len += Math.Sqrt(Dist2(pts[i - 1], pts[i]));
+            if (len < 1) return null;
+            return new PathSample { Points = pts, Length = len };
+        }
+
+        static bool Near(Point3d a, Point3d b, double tol) => Dist2(a, b) <= tol * tol;
+        static double Dist2(Point3d a, Point3d b)
+        {
+            double dx = a.X - b.X, dy = a.Y - b.Y;
+            return dx * dx + dy * dy;
+        }
+
+        static Point3d At(PathSample path, double dist)
+        {
+            var pts = path.Points;
+            if (dist <= 0) return pts[0];
+            double walked = 0;
+            for (int i = 1; i < pts.Count; i++)
+            {
+                double step = Math.Sqrt(Dist2(pts[i - 1], pts[i]));
+                if (walked + step >= dist || i == pts.Count - 1)
+                {
+                    double t = step < 1e-9 ? 0 : Math.Max(0, Math.Min(1, (dist - walked) / step));
+                    return new Point3d(pts[i - 1].X + (pts[i].X - pts[i - 1].X) * t, pts[i - 1].Y + (pts[i].Y - pts[i - 1].Y) * t, 0);
+                }
+                walked += step;
+            }
+            return pts[pts.Count - 1];
+        }
+
         public static bool QuetBinhDo(out ObjectId id, out double len, out bool estimated)
         {
             id = ObjectId.Null; len = 0; estimated = false;
             if (Db == null) return false;
-            ObjectId fallbackId = ObjectId.Null;
-            double fallbackLength = 0;
+            ObjectId alignId = ObjectId.Null, polyId = ObjectId.Null, fallbackId = ObjectId.Null;
+            double alignLen = 0, polyLen = 0, fallbackLen = 0;
+            bool alignGuess = false;
             using (Doc.LockDocument())
             using (var tr = Db.TransactionManager.StartTransaction())
             {
@@ -264,34 +501,38 @@ namespace GKIN
                 var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
                 foreach (ObjectId eid in ms)
                 {
-                    var ent = tr.GetObject(eid, OpenMode.ForRead) as Entity;
-                    if (ent is not Curve c) continue;
-                    if (!(ent is Polyline || ent is Polyline2d || ent is Polyline3d)) continue;
-                    try
+                    if (tr.GetObject(eid, OpenMode.ForRead, false) is not Entity ent) continue;
+                    string layer = (ent.Layer ?? "").ToUpperInvariant();
+                    bool align = IsAlignment(ent);
+                    bool onTim = layer.Contains("TIM") || layer == "TUYEN" || layer.Contains("CENTER");
+                    if (!align && ent is not Polyline && ent is not Polyline2d && ent is not Polyline3d) continue;
+                    if (IsProfile(ent) || IsSection(ent)) continue;
+                    var sample = SampleEntity(ent);
+                    double d = sample == null ? 0 : sample.Length;
+                    bool guess = false;
+                    if (d < 1 && align && TryExtents(ent, out Extents3d ext))
                     {
-                        double d = c.GetDistanceAtParameter(c.EndParam);
-                        if (d > fallbackLength) { fallbackLength = d; fallbackId = eid; }
-                        string layer = (ent.Layer ?? "").ToUpperInvariant();
-                        bool preferred = layer.Contains("TIM") || layer.Contains("TUYEN") || layer.Contains("CENTER");
-                        if (preferred && d > len) { len = d; id = eid; }
+                        d = Math.Sqrt(Math.Pow(ext.MaxPoint.X - ext.MinPoint.X, 2) + Math.Pow(ext.MaxPoint.Y - ext.MinPoint.Y, 2));
+                        guess = true;
                     }
-                    catch { }
+                    if (d < 1) continue;
+                    if (d > fallbackLen && ent is Curve) { fallbackLen = d; fallbackId = eid; }
+                    if (align && d > alignLen) { alignLen = d; alignId = eid; alignGuess = guess; }
+                    else if (!align && onTim && d > polyLen) { polyLen = d; polyId = eid; }
                 }
                 tr.Commit();
             }
-            if (id.IsNull && !fallbackId.IsNull)
-            {
-                id = fallbackId;
-                len = fallbackLength;
-                estimated = true;
-            }
-            return !id.IsNull;
+            if (!alignId.IsNull) { id = alignId; len = alignLen; estimated = alignGuess; return true; }
+            if (!polyId.IsNull) { id = polyId; len = polyLen; return true; }
+            if (!fallbackId.IsNull) { id = fallbackId; len = fallbackLen; estimated = true; return true; }
+            return false;
         }
 
         public static int QuetTracDocKm(out Extents3d? source)
         {
-            int n = 0;
+            int texts = 0, objects = 0;
             source = null;
+            Extents3d? profile = null;
             if (Db == null) return 0;
             using (Doc.LockDocument())
             using (var tr = Db.TransactionManager.StartTransaction())
@@ -301,8 +542,13 @@ namespace GKIN
                 var all = new List<Extents3d>();
                 foreach (ObjectId eid in ms)
                 {
-                    var ent = tr.GetObject(eid, OpenMode.ForRead);
-                    if (ent is Entity entity && TryExtents(entity, out Extents3d ext)) all.Add(ext);
+                    var ent = tr.GetObject(eid, OpenMode.ForRead, false);
+                    if (ent is Entity entity && IsProfile(entity) && TryExtents(entity, out Extents3d profileExt))
+                    {
+                        objects++;
+                        profile = Union(profile, profileExt);
+                    }
+                    if (ent is Entity drawn && TryExtents(drawn, out Extents3d ext)) all.Add(ext);
                     string s = ent switch
                     {
                         DBText t => t.TextString,
@@ -311,20 +557,20 @@ namespace GKIN
                     };
                     if (s != null && StationRegex.IsMatch(s))
                     {
-                        n++;
+                        texts++;
                         if (ent is Entity marker && TryExtents(marker, out Extents3d markerExt))
                             source = Union(source, markerExt);
                     }
                 }
-                source = GrowToNearbyGeometry(source, all, 0.08, 2.50);
+                if (objects > 0) source = profile;
+                else source = GrowToNearbyGeometry(source, all, 0.08, 2.50);
                 tr.Commit();
             }
-            return n;
+            return objects > 0 ? objects : texts;
         }
 
         public static int QuetTracNgang(out Extents3d? source, out List<Extents3d> items)
         {
-            int n = 0;
             source = null;
             items = new List<Extents3d>();
             if (Db == null) return 0;
@@ -334,31 +580,117 @@ namespace GKIN
                 var bt = (BlockTable)tr.GetObject(Db.BlockTableId, OpenMode.ForRead);
                 var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
                 var all = new List<Extents3d>();
+                var parts = new List<Extents3d>();
                 foreach (ObjectId eid in ms)
                 {
-                    var entity = tr.GetObject(eid, OpenMode.ForRead) as Entity;
-                    if (entity != null && TryExtents(entity, out Extents3d ext)) all.Add(ext);
-                    if (entity is not BlockReference br) continue;
-                    string nm = EffectiveName(br).ToUpperInvariant();
-                    if (nm.Contains("TN") || nm.Contains("TNCT") || nm.Contains("MATCAT") || nm.Contains("TRACNGANG"))
+                    if (tr.GetObject(eid, OpenMode.ForRead, false) is not Entity entity) continue;
+                    bool hasExt = TryExtents(entity, out Extents3d ext);
+                    if (hasExt) all.Add(ext);
+                    if (entity is BlockReference br)
                     {
-                        n++;
-                        if (TryExtents(br, out Extents3d markerExt))
+                        string nm = EffectiveName(br).ToUpperInvariant();
+                        if (nm.Contains("TN") || nm.Contains("TNCT") || nm.Contains("MATCAT") || nm.Contains("TRACNGANG"))
                         {
-                            source = Union(source, markerExt);
-                            items.Add(markerExt);
+                            if (hasExt) items.Add(ext);
+                            continue;
                         }
                     }
+                    if (hasExt && IsSection(entity)) parts.Add(ext);
                 }
-                var grownItems = new List<Extents3d>();
-                foreach (Extents3d marker in items)
-                    grownItems.Add(GrowToNearbyGeometry(marker, all, 0.12, 0.20) ?? marker);
-                items = grownItems;
-                source = null;
+                if (items.Count == 0 && parts.Count > 0) items = ClusterSections(parts);
+                else
+                {
+                    var grown = new List<Extents3d>();
+                    foreach (Extents3d marker in items)
+                        grown.Add(GrowToNearbyGeometry(marker, all, 0.12, 0.20) ?? marker);
+                    items = grown;
+                }
                 foreach (Extents3d item in items) source = Union(source, item);
                 tr.Commit();
             }
-            return n;
+            return items.Count;
+        }
+
+        static List<Extents3d> ClusterSections(List<Extents3d> raw)
+        {
+            if (raw.Count == 0) return raw;
+            Extents3d cloud = raw[0];
+            foreach (Extents3d ext in raw) cloud = Union(cloud, ext).Value;
+            double cloudW = Math.Max(1, cloud.MaxPoint.X - cloud.MinPoint.X);
+            double cloudH = Math.Max(1, cloud.MaxPoint.Y - cloud.MinPoint.Y);
+            var parts = raw.Where(ext => Width(ext) < cloudW * 0.55 && Height(ext) < cloudH * 0.55).ToList();
+            if (parts.Count == 0) parts = raw;
+            if (parts.Count == 1) return parts;
+            var sizes = parts.Select(ext => Math.Max(Width(ext), Height(ext))).Where(v => v > 0.01).ToList();
+            double unit = Math.Max(0.5, Median(sizes));
+            List<Extents3d> best = null;
+            int bestScore = int.MinValue;
+            foreach (double factor in new[] { 3.0, 6, 10, 16, 24, 36 })
+            {
+                var clusters = SplitGrid(parts, Math.Max(1, unit * factor));
+                if (clusters.Count == 0) continue;
+                double avg = parts.Count / (double)clusters.Count;
+                int score = Math.Min(clusters.Count, 120);
+                if (clusters.Count >= 2 && clusters.Count <= 400) score += 80;
+                if (avg >= 6) score += 40;
+                if (avg >= 15) score += 20;
+                if (score > bestScore) { bestScore = score; best = clusters; }
+            }
+            if (best == null || best.Count == 0)
+            {
+                best = new List<Extents3d>();
+                Extents3d one = parts[0];
+                foreach (Extents3d ext in parts) one = Union(one, ext).Value;
+                best.Add(one);
+            }
+            return best.Select(ext => Expand(ext, 0.06, 0.10)).ToList();
+        }
+
+        static List<Extents3d> SplitGrid(List<Extents3d> parts, double gap)
+        {
+            var yCuts = Cuts(parts.Select(ext => (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0).ToList(), gap);
+            var xCuts = Cuts(parts.Select(ext => (ext.MinPoint.X + ext.MaxPoint.X) / 2.0).ToList(), gap);
+            int rows = yCuts.Count + 1, cols = xCuts.Count + 1;
+            var bins = new Extents3d?[rows, cols];
+            var counts = new int[rows, cols];
+            foreach (Extents3d ext in parts)
+            {
+                int r = Band(yCuts, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0);
+                int c = Band(xCuts, (ext.MinPoint.X + ext.MaxPoint.X) / 2.0);
+                bins[r, c] = bins[r, c] == null ? ext : Union(bins[r, c], ext);
+                counts[r, c]++;
+            }
+            var result = new List<Extents3d>();
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < cols; c++)
+                    if (counts[r, c] >= 4 && bins[r, c] != null) result.Add(bins[r, c].Value);
+            return result;
+        }
+
+        static List<double> Cuts(List<double> coords, double minGap)
+        {
+            var cuts = new List<double>();
+            if (coords.Count < 2) return cuts;
+            coords.Sort();
+            for (int i = 1; i < coords.Count; i++)
+                if (coords[i] - coords[i - 1] > minGap) cuts.Add((coords[i] + coords[i - 1]) / 2.0);
+            return cuts;
+        }
+
+        static int Band(List<double> cuts, double value)
+        {
+            int i = 0;
+            while (i < cuts.Count && value > cuts[i]) i++;
+            return i;
+        }
+
+        static double Width(Extents3d ext) => Math.Abs(ext.MaxPoint.X - ext.MinPoint.X);
+        static double Height(Extents3d ext) => Math.Abs(ext.MaxPoint.Y - ext.MinPoint.Y);
+        static double Median(List<double> values)
+        {
+            if (values.Count == 0) return 1;
+            values.Sort();
+            return values[values.Count / 2];
         }
 
         public static List<LayoutSheetInfo> ScanLayoutSheets()
@@ -1322,9 +1654,10 @@ namespace GKIN
             {
                 using (var tr = curveId.Database.TransactionManager.StartOpenCloseTransaction())
                 {
-                    if (tr.GetObject(curveId, OpenMode.ForRead, false) is not Curve curve) return new List<Strip> { whole };
-                    double len = curve.GetDistanceAtParameter(curve.EndParam);
-                    if (len < 1) return new List<Strip> { whole };
+                    if (tr.GetObject(curveId, OpenMode.ForRead, false) is not Entity ent) return new List<Strip> { whole };
+                    PathSample path = SampleEntity(ent);
+                    if (path == null || path.Length < 1 || path.Points == null || path.Points.Count < 2) return new List<Strip> { whole };
+                    double len = path.Length;
                     var list = new List<Strip>();
                     int count = Math.Max(1, (int)Math.Ceiling(len / step));
                     for (int i = 0; i < count; i++)
@@ -1332,12 +1665,12 @@ namespace GKIN
                         double d0 = Math.Min(len, i * step);
                         double d1 = Math.Min(len, (i + 1) * step);
                         if (d1 - d0 < 1) continue;
-                        var p0 = curve.GetPointAtDist(d0);
-                        var p1 = curve.GetPointAtDist(d1);
-                        var mid = curve.GetPointAtDist((d0 + d1) / 2.0);
+                        var p0 = At(path, d0);
+                        var p1 = At(path, d1);
+                        var mid = At(path, (d0 + d1) / 2.0);
                         var ext = new Extents3d(p0, p0);
                         for (int s = 0; s <= 8; s++)
-                            ext.AddPoint(curve.GetPointAtDist(Math.Min(len, d0 + (d1 - d0) * s / 8.0)));
+                            ext.AddPoint(At(path, Math.Min(len, d0 + (d1 - d0) * s / 8.0)));
                         list.Add(new Strip
                         {
                             Ext = Expand(ext, 0.35, 0.35),

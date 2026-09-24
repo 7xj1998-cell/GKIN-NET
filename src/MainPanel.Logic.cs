@@ -256,13 +256,13 @@ namespace GKIN
         {
             stKt.Text = string.IsNullOrEmpty(_khung) ? "Chưa có" : "✓ 1 khung · " + _khung;
             stBd.Text = _hasBd ? "✓ 1 tim · " + CadEngine.FmtM(_bdLen) + (_bdEstimated ? " · ước lượng" : "") : "Không thấy";
-            stTd.Text = _hasTd ? $"✓ {_tdN} dải · đầu bảng ✓" : "Không thấy";
-            stTn.Text = _hasTn ? $"✓ {_tnN} lưới mặt cắt" : "Không thấy";
+            stTd.Text = _hasTd ? (_tdN <= 3 ? "✓ trắc dọc VNROAD" : $"✓ {_tdN} dải · đầu bảng ✓") : "Không thấy";
+            stTn.Text = _hasTn ? $"✓ {_tnN} mặt cắt" : "Không thấy";
             pillKhung.Text = string.IsNullOrEmpty(_khung) ? "Chưa có khung" : "✓ Khung";
             pillBd.Text = _hasBd ? "BĐ 1 tim" : "BĐ 0";
             int tdSheets = _layoutSheets.Count > 0 ? _layoutSheets.Count(x => x.Type == "TD") : _modelTdSheets;
             pillTd.Text = $"TĐ {tdSheets} tờ";
-            pillTn.Text = _hasTn ? $"TN {_tnN} lưới" : "TN 0";
+            pillTn.Text = _hasTn ? $"TN {_tnN}" : "TN 0";
             pillDau.Text = _hasTd ? $"Đầu bảng {_tdN}/{_tdN}" : "Đầu bảng 0/0";
             pillKem.Text = "Kèm 0";
         }
@@ -296,7 +296,14 @@ namespace GKIN
                 {
                     var e = tr.GetObject(r.ObjectId, OpenMode.ForRead);
                     if (loai == 'K' && e is BlockReference br) { _khung = CadEngine.EffectiveName(br); _kt = r.ObjectId; _def = br.BlockTableRecord; NapTags(_kt); }
-                    else if (loai == 'B' && e is Curve c) { _bd = r.ObjectId; try { _bdExt = c.GeometricExtents; _bdLen = c.GetDistanceAtParameter(c.EndParam); } catch { } _bdEstimated = false; _hasBd = true; }
+                    else if (loai == 'B' && e is Entity be)
+                    {
+                        _bd = r.ObjectId;
+                        _bdLen = CadEngine.MeasureLength(be);
+                        if (CadEngine.ExtentsOf(be, out Extents3d bext)) _bdExt = bext;
+                        _bdEstimated = _bdLen <= 1;
+                        _hasBd = true;
+                    }
                     else if (loai == 'D' && e is Entity td) { _hasTd = true; _tdN = Math.Max(1, _tdN); try { _tdExt = CadEngine.Expand(td.GeometricExtents, 0.08, 2.50); } catch { } }
                     else if (e is Entity tn) { _hasTn = true; _tnN = 1; try { var ext = tn.GeometricExtents; _tnItems = new List<Extents3d> { ext }; _tnExt = CadEngine.Expand(ext, 0.12, 0.20); } catch { } }
                     tr.Commit();
