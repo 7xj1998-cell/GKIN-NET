@@ -1,4 +1,4 @@
-GKIN v0.3.7 — GHÉP KHUNG, IN NHANH
+GKIN v0.3.9 — GHÉP KHUNG, IN NHANH
 
 1. Tải GKIN-APPLOAD.zip tại:
    https://github.com/7xj1998-cell/GKIN-NET/releases

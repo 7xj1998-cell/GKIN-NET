@@ -5,14 +5,14 @@ Palette AutoCAD ghép khung, đánh số tờ và in nhanh cho hồ sơ bình đ
 ## Tính năng
 
 - Bảng tiếng Việt, tab nằm ngang, chữ không bị cắt. Trang dài thì cuộn.
-- Tự dò khung tên, tim tuyến VNROAD (`TDTDBALIGNMENT` / `TDTDBPOLYLINE` / `plinetntn`), trắc dọc, trắc ngang.
+- Tự dò khung tên và hình học VNroad 7.1/9.1: tim `TDTDBALIGNMENT` (kể cả proxy trên layer `Tuyen`), trắc dọc `plinetdtn`/`tracdocthietke`, trắc ngang `plinetntn` có XData `KS_TN`.
 - Cắt trắc dọc theo bước mét: nhân bản đầu bảng, cắt dải theo X, lấy lý trình thật (`Km0+00 -:- Km0+340.00`).
 - Xếp mặt cắt ngang lưới Ngang 1-2-3-4 hoặc Dọc; đầy tờ thì sang tờ mới.
-- Mặc định xuất `LAYOUT — gộp IN-BDTDTN`: cắt BĐ/TĐ/TN rồi xếp nhiều khung+viewport trên **một** paperspace, giống PXHS. Tùy chọn cũ «mỗi tờ một layout» vẫn còn.
+- Mặc định xuất `LAYOUT — gộp IN-BDTDTN`: cắt BĐ/TĐ/TN rồi xếp nhiều khung và viewport trên **một** paperspace. Tùy chọn cũ «mỗi tờ một layout» vẫn còn.
 - Ghi đồng loạt thẻ khung: `TOSO`/`STT`, `MATO`/`MSBV`, `TONGTO`/`BVS`, `TENTOBVE`/`TENBVE`, `TYLE`.
 - In PDF nhiều trang bằng AutoCAD `PlotEngine`.
 
-## Lõi hình học (0.3.8)
+## Lõi hình học (0.3.9)
 
 | Service | Việc làm |
 |---|---|

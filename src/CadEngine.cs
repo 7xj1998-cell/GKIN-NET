@@ -294,25 +294,50 @@ namespace GKIN
 
         static bool IsAlignment(Entity ent)
         {
+            string layer = (ent.Layer ?? "").ToUpperInvariant();
             string rx = RxName(ent).ToUpperInvariant();
-            return rx.Contains("ALIGNMENT") || rx.Contains("TDTDBALIGN");
+            if (rx.Contains("ALIGNMENT") || rx.Contains("TDTDBALIGN")) return true;
+
+            // VNroad 7.1 without its object enabler exposes TDTDBALIGNMENT as
+            // AcDbZombieEntity/ACAD_PROXY_ENTITY.  The stable signal left in the
+            // drawing is the TUYEN layer (and normally an extension dictionary).
+            return layer == "TUYEN"
+                && (ent is ProxyEntity || rx.Contains("ZOMBIE") || rx.Contains("PROXY"));
         }
 
         static bool IsProfile(Entity ent)
         {
             string layer = (ent.Layer ?? "").ToUpperInvariant();
-            string rx = RxName(ent).ToUpperInvariant();
             if (layer.Contains("PLINETNTN") || layer.Contains("TRACNGANG")) return false;
             return layer.Contains("PLINETDTN") || layer.Contains("PLINETD") || layer.Contains("TRACDOC")
-                || rx.Contains("TDTDBPOLYLINE");
+                || layer.Contains("PROFILE");
         }
 
         static bool IsSection(Entity ent)
         {
             string layer = (ent.Layer ?? "").ToUpperInvariant();
             if (layer.Contains("PLINETDTN") || layer.Contains("PLINETD") || layer.Contains("TRACDOC") || layer == "TUYEN") return false;
-            return layer.Contains("PLINETNTN") || layer.Contains("PLINETN") || layer.Contains("TRACNGANG")
+            return HasXDataApp(ent, "KS_TN")
+                || layer.Contains("PLINETNTN") || layer.Contains("PLINETN") || layer.Contains("TRACNGANG")
                 || layer.Contains("MATCAT") || layer.Contains("TCTN");
+        }
+
+        static bool HasXDataApp(DBObject value, string application)
+        {
+            if (value == null || string.IsNullOrWhiteSpace(application)) return false;
+            ResultBuffer data = null;
+            try
+            {
+                data = value.XData;
+                if (data == null) return false;
+                foreach (TypedValue item in data)
+                    if (item.TypeCode == (int)DxfCode.ExtendedDataRegAppName
+                        && string.Equals(Convert.ToString(item.Value), application, StringComparison.OrdinalIgnoreCase))
+                        return true;
+            }
+            catch { }
+            finally { data?.Dispose(); }
+            return false;
         }
 
         public static double MeasureLength(Entity ent)
@@ -575,11 +600,15 @@ namespace GKIN
                             source = Union(source, markerExt);
                     }
                 }
-                if (objects > 0) source = profile;
+                // TRACDOCTHIETKE/PLINETDTN are only the terrain/design curves.
+                // Grow from those stable VNroad layers to include the table,
+                // station labels and ordinates that belong to the same profile.
+                if (objects > 0) source = GrowToNearbyGeometry(profile, all, 0.06, 2.50) ?? profile;
                 else source = GrowToNearbyGeometry(source, all, 0.08, 2.50);
                 tr.Commit();
             }
-            return objects > 0 ? objects : texts;
+            // The number of matching polylines is not the number of profiles.
+            return source != null ? 1 : texts;
         }
 
         public static int QuetTracNgang(out Extents3d? source, out List<Extents3d> items)
@@ -594,11 +623,13 @@ namespace GKIN
                 var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
                 var all = new List<Extents3d>();
                 var parts = new List<Extents3d>();
+                var markers = new List<Extents3d>();
                 foreach (ObjectId eid in ms)
                 {
                     if (tr.GetObject(eid, OpenMode.ForRead, false) is not Entity entity) continue;
                     bool hasExt = TryExtents(entity, out Extents3d ext);
                     if (hasExt) all.Add(ext);
+                    if (hasExt && HasXDataApp(entity, "KS_TN")) markers.Add(ext);
                     if (entity is BlockReference br)
                     {
                         string nm = EffectiveName(br).ToUpperInvariant();
@@ -610,7 +641,15 @@ namespace GKIN
                     }
                     if (hasExt && IsSection(entity)) parts.Add(ext);
                 }
-                if (items.Count == 0 && parts.Count > 0) items = ClusterSections(parts);
+                if (items.Count == 0 && markers.Count > 0)
+                {
+                    // VNroad 7.1 writes KS_TN on the representative polyline of
+                    // each cross-section.  Use it as the primary seed instead of
+                    // guessing from every line on PLINETNTN.
+                    foreach (Extents3d marker in MergeOverlapping(markers))
+                        items.Add(GrowToNearbyGeometry(marker, all, 0.10, 0.60) ?? marker);
+                }
+                else if (items.Count == 0 && parts.Count > 0) items = ClusterSections(parts);
                 else
                 {
                     var grown = new List<Extents3d>();
@@ -622,6 +661,26 @@ namespace GKIN
                 tr.Commit();
             }
             return items.Count;
+        }
+
+        static List<Extents3d> MergeOverlapping(IList<Extents3d> values)
+        {
+            var result = new List<Extents3d>();
+            if (values == null) return result;
+            foreach (Extents3d value in values.OrderByDescending(x => x.MaxPoint.Y).ThenBy(x => x.MinPoint.X))
+            {
+                int match = -1;
+                Extents3d probe = Expand(value, 0.02, 0.05);
+                for (int i = 0; i < result.Count; i++)
+                {
+                    if (!Intersects2d(Expand(result[i], 0.02, 0.05), probe)) continue;
+                    match = i;
+                    break;
+                }
+                if (match < 0) result.Add(value);
+                else result[match] = Union(result[match], value).Value;
+            }
+            return result;
         }
 
         static List<Extents3d> ClusterSections(List<Extents3d> raw)
