@@ -68,27 +68,28 @@ namespace GKIN
         readonly Label status = NewLbl("Sẵn sàng", CPhu);
         readonly Panel pg1 = NewPage(), pg2 = NewPage(), pg3 = NewPage(), pg4 = NewPage();
         readonly TabButton[] tabs = new TabButton[4];
-        readonly Panel footer = new Panel { Dock = DockStyle.Bottom, Height = 128, BackColor = CNen };
+        readonly Panel footer = new Panel { Dock = DockStyle.Bottom, Height = 102, BackColor = CNen };
         readonly ToolTip hint = new ToolTip { AutoPopDelay = 10000, InitialDelay = 400, ReshowDelay = 200 };
 
         public MainPanel()
         {
             SuspendLayout();
-            AutoScaleMode = AutoScaleMode.None;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleDimensions = new SizeF(96f, 96f);
             BackColor = CNen;
             ForeColor = CChu;
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+            Font = new Font("Segoe UI", 8.25f, FontStyle.Regular, GraphicsUnit.Point);
             Dock = DockStyle.Fill;
-            MinimumSize = new Size(480, 480);
+            MinimumSize = new Size(380, 420);
 
             var bar = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 36,
+                Height = 32,
                 WrapContents = false,
-                AutoScroll = true,
+                AutoScroll = false,
                 BackColor = Color.FromArgb(24, 35, 46),
-                Padding = new Padding(4, 3, 4, 0)
+                Padding = new Padding(4, 2, 4, 0)
             };
             string[] names = { "Bản vẽ", "Đánh số tờ", "In PDF", "Thông tin" };
             Color[] colors = { CXanh, CTim, CCam, CLuc };
@@ -105,7 +106,7 @@ namespace GKIN
             var pills = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 56,
+                Height = 48,
                 WrapContents = true,
                 AutoScroll = false,
                 BackColor = Color.Transparent,
@@ -114,15 +115,15 @@ namespace GKIN
             };
             pills.Controls.AddRange(new Control[] { pillKhung, pillBd, pillTd, pillTn, pillDau, pillKem });
             status.Dock = DockStyle.Top;
-            status.Height = 22;
+            status.Height = 18;
             status.AutoEllipsis = true;
             status.TextAlign = ContentAlignment.MiddleLeft;
-            status.Font = new Font("Segoe UI", 8.25f);
+            status.Font = new Font("Segoe UI", 8f);
 
             var actions = new TableLayoutPanel
             {
                 Dock = DockStyle.Bottom,
-                Height = 36,
+                Height = 32,
                 ColumnCount = 3,
                 RowCount = 1,
                 BackColor = CNen,
@@ -143,7 +144,7 @@ namespace GKIN
             rescan.FlatAppearance.BorderSize = 1;
             run.Dock = DockStyle.Fill;
             run.Margin = new Padding(0, 0, 6, 0);
-            run.MinimumSize = new Size(120, 32);
+            run.MinimumSize = new Size(120, 28);
             print.Margin = new Padding(0, 0, 6, 0);
             rescan.Margin = Padding.Empty;
             run.Click += (_, __) => ThucHien();
