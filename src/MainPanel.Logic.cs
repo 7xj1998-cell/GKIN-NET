@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
+using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Font = System.Drawing.Font;
@@ -87,6 +88,9 @@ namespace GKIN
         {
             try
             {
+                var db = CadEngine.Db;
+                if (db == null) { ResetState(null); Toast("Khong co ban ve dang mo."); return; }
+                if (!ReferenceEquals(_stateDb, db)) ResetState(db);
                 _frames = CadEngine.QuetKhung();
                 cboKhung.Items.Clear();
                 foreach (var f in _frames) cboKhung.Items.Add(f);
@@ -99,11 +103,46 @@ namespace GKIN
                     _khung = _frames[best].Name; _kt = _frames[best].Sample; NapTags(_kt);
                 }
                 _hasBd = CadEngine.QuetBinhDo(out _bd, out _bdLen);
-                _tdN = CadEngine.QuetTracDocKm(); _hasTd = _tdN > 0;
-                _tnN = CadEngine.QuetTracNgang(); _hasTn = _tnN > 0;
+                _bdExt = _hasBd ? CadEngine.BBox(_bd) : null;
+                _tdN = CadEngine.QuetTracDocKm(out _tdExt); _hasTd = _tdN > 0;
+                _tnN = CadEngine.QuetTracNgang(out _tnExt); _hasTn = _tnN > 0;
                 CapNhat(); Toast("Da do lai ban ve.");
             }
             catch (Exception ex) { Toast("Loi do: " + ex.Message); }
+        }
+
+        public void OnDocumentChanged(Document doc)
+        {
+            ResetState(doc?.Database);
+            if (doc == null || IsDisposed || !IsHandleCreated) return;
+            BeginInvoke(new Action(() =>
+            {
+                if (!IsDisposed && ReferenceEquals(CadEngine.Doc, doc)) DoLai();
+            }));
+        }
+
+        void ResetState(Database db)
+        {
+            _stateDb = db;
+            _frames.Clear();
+            _khung = null;
+            _kt = ObjectId.Null;
+            _bd = ObjectId.Null;
+            _bdExt = _tdExt = _tnExt = null;
+            _layoutSheets.Clear();
+            _bdLen = 0;
+            _tdN = _tnN = 0;
+            _hasBd = _hasTd = _hasTn = false;
+            cboKhung.Items.Clear();
+            CapNhat();
+        }
+
+        bool EnsureCurrentDocument()
+        {
+            var db = CadEngine.Db;
+            if (db == null) { Toast("Khong co ban ve dang mo."); return false; }
+            if (!ReferenceEquals(_stateDb, db)) DoLai();
+            return ReferenceEquals(_stateDb, db);
         }
 
         void NapTags(ObjectId id)
@@ -146,6 +185,7 @@ namespace GKIN
 
         void Tay(char loai)
         {
+            if (!EnsureCurrentDocument()) return;
             PaletteHost.AllowPick(() =>
             {
                 var r = CadEngine.Pick(loai == 'K' ? "Chon khung ten: " : loai == 'B' ? "Chon tim: " : "Chon DT: ");
@@ -155,9 +195,9 @@ namespace GKIN
                 {
                     var e = tr.GetObject(r.ObjectId, OpenMode.ForRead);
                     if (loai == 'K' && e is BlockReference br) { _khung = CadEngine.EffectiveName(br); _kt = r.ObjectId; NapTags(_kt); }
-                    else if (loai == 'B' && e is Curve c) { _bd = r.ObjectId; try { _bdLen = c.GetDistanceAtParameter(c.EndParam); } catch { } _hasBd = true; }
-                    else if (loai == 'D') { _hasTd = true; _tdN = Math.Max(1, _tdN); }
-                    else { _hasTn = true; _tnN = Math.Max(1, _tnN); }
+                    else if (loai == 'B' && e is Curve c) { _bd = r.ObjectId; try { _bdExt = c.GeometricExtents; _bdLen = c.GetDistanceAtParameter(c.EndParam); } catch { } _hasBd = true; }
+                    else if (loai == 'D' && e is Entity td) { _hasTd = true; _tdN = Math.Max(1, _tdN); try { _tdExt = CadEngine.Expand(td.GeometricExtents, 0.08, 2.50); } catch { } }
+                    else if (e is Entity tn) { _hasTn = true; _tnN = Math.Max(1, _tnN); try { _tnExt = CadEngine.Expand(tn.GeometricExtents, 0.12, 0.20); } catch { } }
                     tr.Commit();
                 }
                 CapNhat();
@@ -166,6 +206,7 @@ namespace GKIN
 
         void ThucHien()
         {
+            if (!EnsureCurrentDocument()) return;
             if (_page == 1) DongKhung();
             else if (_page == 2) DanhSo();
             else if (_page == 3) InPdf();
@@ -176,46 +217,128 @@ namespace GKIN
         {
             if (string.IsNullOrEmpty(_khung)) { Toast("Chua co khung ten."); return; }
             int ntd = SoToTD(), ntn = SoToTN(), nbd = (_hasBd && !chkGop.Checked) ? 1 : 0;
-            CadEngine.Ed?.WriteMessage($"\nGKIN: BD {nbd} TD {ntd} TN {ntn}");
-            CapNhat(); Toast($"OK phuong an BD {nbd} TD {ntd} TN {ntn}");
+            if (cboXuat.SelectedIndex != 2)
+            {
+                Toast("Che do MODEL chua an toan; hay chon LAYOUT de tao khung + viewport.");
+                return;
+            }
+            var made = CadEngine.CreateLayouts(
+                _kt,
+                chkBD.Checked ? _bdExt : null,
+                chkTD.Checked ? _tdExt : null,
+                chkTN.Checked ? _tnExt : null,
+                ntd, ntn, chkGop.Checked, cboHuong.SelectedIndex == 1,
+                out string error);
+            _layoutSheets = made;
+            CapNhat();
+            if (!string.IsNullOrEmpty(error))
+                Toast($"Da tao {made.Count} Layout, dung tai loi: {error}");
+            else
+                Toast($"OK da tao {made.Count} Layout (BD {nbd}, TD {ntd}, TN {ntn})");
         }
 
         void DanhSo()
         {
-            var frames = CadEngine.KhungRai(_khung);
+            bool useLayouts = cboXuat.SelectedIndex == 2;
+            if (useLayouts && _layoutSheets.Count == 0)
+            {
+                Toast("Chua co Layout GKIN trong phien nay; hay THUC HIEN o tab Ban ve truoc.");
+                return;
+            }
+            var frames = useLayouts
+                ? _layoutSheets.ConvertAll(x => x.FrameId)
+                : CadEngine.KhungRai(_khung);
             if (frames.Count == 0) { Toast("Khong thay khung rai."); return; }
-            int nbd = (_hasBd && !chkGop.Checked) ? 1 : 0, ntd = SoToTD(), ntn = SoToTN();
+            int nbd = useLayouts ? _layoutSheets.FindAll(x => x.Type == "BD").Count : (_hasBd && !chkGop.Checked) ? 1 : 0;
+            int ntd = useLayouts ? _layoutSheets.FindAll(x => x.Type == "TD").Count : SoToTD();
+            int ntn = useLayouts ? _layoutSheets.FindAll(x => x.Type == "TN").Count : SoToTN();
             if (frames.Count != nbd + ntd + ntn) ntn = Math.Max(0, frames.Count - nbd - ntd);
             int.TryParse(txtSoBD.Text, out int sobd); int.TryParse(txtSoCS.Text, out int cs);
             if (sobd < 1) sobd = 1; if (cs < 1) cs = 2;
-            int cntBD = sobd, cntTD = sobd, cntTN = sobd, idxAll = sobd, nghi = 0;
+            double.TryParse(txtKC.Text, out double kc); if (kc <= 0) kc = 350;
+            int cntBD = sobd, cntTD = sobd, cntTN = sobd, idxAll = sobd;
+            int totalAll = sobd - 1 + frames.Count;
+            var totals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["BD"] = sobd - 1 + nbd,
+                ["TD"] = sobd - 1 + ntd,
+                ["TN"] = sobd - 1 + ntn
+            };
+            var updates = new List<KeyValuePair<ObjectId, Dictionary<string, string>>>();
             for (int i = 0; i < frames.Count; i++)
             {
-                string loai = i < nbd ? "BD" : i < nbd + ntd ? "TD" : "TN";
+                string loai = useLayouts ? _layoutSheets[i].Type : i < nbd ? "BD" : i < nbd + ntd ? "TD" : "TN";
                 int idxL = loai == "BD" ? cntBD : loai == "TD" ? cntTD : cntTN;
-                string tag = tagSTT.SelectedIndex > 0 ? tagSTT.Text : null;
-                if (tag != null && CadEngine.GanAttr(frames[i], tag, CadEngine.Pad(kieuSTT.SelectedIndex == 0 ? idxAll : idxL, cs))) nghi++;
+                var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                AddField(values, tagSTT, kieuSTT,
+                    kieuSTT.SelectedIndex == 0 ? CadEngine.Pad(idxAll, cs) : CadEngine.Pad(idxL, cs));
+                AddField(values, tagMS, kieuMS,
+                    Prefix(loai) + CadEngine.Pad(kieuMS.SelectedIndex == 0 ? idxL : idxAll, cs));
+                AddField(values, tagBVS, kieuBVS,
+                    CadEngine.Pad(kieuBVS.SelectedIndex == 0 ? idxL : idxAll, cs) + "/" +
+                    CadEngine.Pad(kieuBVS.SelectedIndex == 0 ? totals[loai] : totalAll, cs));
+                AddField(values, tagTen, kieuTen,
+                    kieuTen.SelectedIndex == 0 && loai == "TD"
+                        ? $"{SheetName(loai)} ({CadEngine.LyTrinh((idxL - 1) * kc)} - {CadEngine.LyTrinh(idxL * kc)})"
+                        : SheetName(loai));
+                AddField(values, tagTL, kieuTL, ScaleText(loai, kieuTL.SelectedIndex));
+                if (values.Count > 0)
+                    updates.Add(new KeyValuePair<ObjectId, Dictionary<string, string>>(frames[i], values));
                 if (loai == "BD") cntBD++; else if (loai == "TD") cntTD++; else cntTN++;
                 idxAll++;
             }
-            Toast($"OK ghi {nghi}/{frames.Count} to");
+            if (updates.Count == 0) { Toast("Khong co truong attribute nao duoc chon de ghi."); return; }
+            int changed = CadEngine.GanAttrs(updates);
+            Toast($"OK da ghi {changed} attribute tren {updates.Count}/{frames.Count} to");
+        }
+
+        static void AddField(Dictionary<string, string> values, ComboBox tag, ComboBox mode, string value)
+        {
+            if (tag.SelectedIndex <= 0 || mode.SelectedIndex == 2 || string.IsNullOrWhiteSpace(value)) return;
+            values[tag.Text] = value;
+        }
+
+        string Prefix(string loai) => loai == "BD" ? preBD.Text : loai == "TD" ? preTD.Text : preTN.Text;
+        string SheetName(string loai) => loai == "BD" ? tenBD.Text : loai == "TD" ? tenTD.Text : tenTN.Text;
+
+        string ScaleText(string loai, int mode)
+        {
+            string scale = loai == "BD" ? txtTLBD.Text : loai == "TD" ? txtTLTD.Text : txtTLTN.Text;
+            return loai == "TD" && mode == 0 ? $"1/{scale} ; 1/{scale}" : $"1/{scale}";
         }
 
         void InPdf()
         {
-            var frames = CadEngine.KhungRai(_khung);
-            if (frames.Count == 0) { Toast("Khong thay khung rai."); return; }
+            bool useLayouts = cboXuat.SelectedIndex == 2;
+            if (useLayouts && _layoutSheets.Count == 0)
+            {
+                Toast("Chua co Layout GKIN trong phien nay; hay THUC HIEN o tab Ban ve truoc.");
+                return;
+            }
+            var frames = useLayouts ? _layoutSheets.ConvertAll(x => x.FrameId) : CadEngine.KhungRai(_khung);
+            if (frames.Count == 0) { Toast("Khong thay to de in."); return; }
             if (string.IsNullOrWhiteSpace(txtPDF.Text)) { Toast("Chua chon PDF."); return; }
             if (cboPC3.Items.Count == 0) NapMayIn();
             string dir = System.IO.Path.GetDirectoryName(txtPDF.Text);
             string bas = System.IO.Path.GetFileNameWithoutExtension(txtPDF.Text);
             int ok = 0;
+            string lastError = null;
             for (int i = 0; i < frames.Count; i++)
             {
-                string fn = System.IO.Path.Combine(dir ?? ".", $"{bas}-{CadEngine.Pad(i + 1, 2)}.pdf");
-                if (CadEngine.PlotWindow(frames[i], cboPC3.Text, cboCTB.Text, fn)) ok++;
+                string type = useLayouts ? _layoutSheets[i].Type : "TO";
+                string fn = System.IO.Path.Combine(dir ?? ".", $"{bas}-{CadEngine.Pad(i + 1, 2)}-{type}.pdf");
+                string ctb = chkRieng.Checked
+                    ? type == "BD" ? cboCTBBD.Text : type == "TD" ? cboCTBTD.Text : cboCTBTN.Text
+                    : cboCTB.Text;
+                bool plotted = useLayouts
+                    ? CadEngine.PlotLayout(_layoutSheets[i].LayoutId, cboPC3.Text, ctb, fn)
+                    : CadEngine.PlotWindow(frames[i], cboPC3.Text, ctb, fn);
+                if (plotted) ok++;
+                else lastError = CadEngine.LastError;
             }
-            Toast($"Gui in {ok}/{frames.Count}");
+            Toast(lastError == null
+                ? $"Da tao PDF {ok}/{frames.Count}"
+                : $"Da tao PDF {ok}/{frames.Count}; loi cuoi: {lastError}");
         }
 
         void NapMayIn()

@@ -11,6 +11,7 @@
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="AutoCAD.NET" Version="24.3.0" />
+    <!-- Build against the oldest SDK in the supported 2021-2024 family. -->
+    <PackageReference Include="AutoCAD.NET" Version="24.0.0" />
   </ItemGroup>
 </Project>

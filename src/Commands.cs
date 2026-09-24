@@ -10,10 +10,14 @@ namespace GKIN
     {
         public void Initialize()
         {
-            PaletteHost.Ensure();
+            // Defer WinForms/PaletteSet creation until GKINUI is invoked.
+            // This keeps NETLOAD safe in Core Console and during AutoCAD startup.
         }
 
-        public void Terminate() { }
+        public void Terminate()
+        {
+            PaletteHost.Terminate();
+        }
     }
 
     public class Commands

@@ -19,9 +19,12 @@ namespace GKIN
         static readonly Color CLucDam = Color.FromArgb(21, 128, 61);
 
         int _page = 1;
+        Database _stateDb;
         List<FrameInfo> _frames = new List<FrameInfo>();
         string _khung;
         ObjectId _kt, _bd;
+        Extents3d? _bdExt, _tdExt, _tnExt;
+        List<LayoutSheetInfo> _layoutSheets = new List<LayoutSheetInfo>();
         double _bdLen;
         int _tdN, _tnN;
         bool _hasBd, _hasTd, _hasTn;

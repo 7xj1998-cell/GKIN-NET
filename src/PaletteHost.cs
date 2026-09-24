@@ -9,6 +9,7 @@ namespace GKIN
     {
         static PaletteSet _ps;
         static MainPanel _panel;
+        static bool _eventsAttached;
 
         public static MainPanel Panel => _panel;
 
@@ -27,6 +28,34 @@ namespace GKIN
                 KeepFocus = true
             };
             _ps.Add("GKIN", _panel);
+            AttachDocumentEvents();
+        }
+
+        static void AttachDocumentEvents()
+        {
+            if (_eventsAttached) return;
+            AcadApp.DocumentManager.DocumentActivated += OnDocumentActivated;
+            AcadApp.DocumentManager.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
+            _eventsAttached = true;
+        }
+
+        static void OnDocumentActivated(object sender, DocumentCollectionEventArgs e)
+        {
+            _panel?.OnDocumentChanged(e.Document);
+        }
+
+        static void OnDocumentToBeDestroyed(object sender, DocumentCollectionEventArgs e)
+        {
+            if (ReferenceEquals(e.Document, AcadApp.DocumentManager.MdiActiveDocument))
+                _panel?.OnDocumentChanged(null);
+        }
+
+        public static void Terminate()
+        {
+            if (!_eventsAttached) return;
+            AcadApp.DocumentManager.DocumentActivated -= OnDocumentActivated;
+            AcadApp.DocumentManager.DocumentToBeDestroyed -= OnDocumentToBeDestroyed;
+            _eventsAttached = false;
         }
 
         public static void Show()
