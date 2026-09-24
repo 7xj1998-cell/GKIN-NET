@@ -42,7 +42,7 @@ namespace GKIN
         public string Type;
     }
 
-    public static class CadEngine
+    public static partial class CadEngine
     {
         sealed class SheetPlan
         {
