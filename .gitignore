@@ -3,3 +3,12 @@ obj/
 dist/
 *.user
 .vs/
+smoke-bin*/
+smoke-*.pdf
+smoke-result.txt
+preview-*.png
+tmp/
+tools/
+IRD_*.log
+plot.log
+/GKIN-APPLOAD.zip

@@ -3,20 +3,24 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.DatabaseServices;
+using Font = System.Drawing.Font;
 
 namespace GKIN
 {
     public partial class MainPanel : UserControl
     {
-        static readonly Color CNen = Color.FromArgb(11, 15, 23);
-        static readonly Color CCard = Color.FromArgb(21, 27, 38);
-        static readonly Color CChu = Color.FromArgb(232, 236, 244);
-        static readonly Color CPhu = Color.FromArgb(139, 147, 167);
-        static readonly Color CXanh = Color.FromArgb(59, 130, 246);
-        static readonly Color CTim = Color.FromArgb(139, 92, 246);
-        static readonly Color CCam = Color.FromArgb(245, 158, 11);
-        static readonly Color CLuc = Color.FromArgb(34, 197, 94);
-        static readonly Color CLucDam = Color.FromArgb(21, 128, 61);
+        internal static readonly Color CNen = Color.FromArgb(29, 40, 52);
+        internal static readonly Color CCard = Color.FromArgb(38, 52, 66);
+        internal static readonly Color CChu = Color.FromArgb(231, 237, 243);
+        internal static readonly Color CPhu = Color.FromArgb(157, 170, 182);
+        internal static readonly Color CInput = Color.FromArgb(247, 248, 250);
+        internal static readonly Color CInputText = Color.FromArgb(39, 47, 55);
+        internal static readonly Color CXanh = Color.FromArgb(38, 166, 232);
+        internal static readonly Color CTim = Color.FromArgb(162, 100, 235);
+        internal static readonly Color CCam = Color.FromArgb(255, 157, 40);
+        internal static readonly Color CLuc = Color.FromArgb(43, 207, 111);
+        internal static readonly Color CHong = Color.FromArgb(234, 93, 151);
+        internal static readonly Color CVang = Color.FromArgb(226, 175, 56);
 
         int _page = 1;
         Database _stateDb;
@@ -30,61 +34,108 @@ namespace GKIN
         bool _hasBd, _hasTd, _hasTn;
 
         readonly ComboBox cboKhung = NewCombo();
-        readonly Label stKt = NewLbl("chua co", CLuc);
-        readonly Label stBd = NewLbl("-", CLuc);
-        readonly Label stTd = NewLbl("-", CLuc);
-        readonly Label stTn = NewLbl("-", CLuc);
-        readonly TextBox txtTLBD = NewTxt("1000"), txtTLTD = NewTxt("1000"), txtTLTN = NewTxt("200"), txtKC = NewTxt("350");
+        readonly Label stKt = NewLbl("Chưa có", CLuc);
+        readonly Label stBd = NewLbl("—", CLuc);
+        readonly Label stTd = NewLbl("—", CLuc);
+        readonly Label stTn = NewLbl("—", CLuc);
+        readonly Label stKhac = NewLbl("Không thấy (căn chữ tiêu đề mặt cắt điển hình, kết cấu...)", CPhu);
+        readonly TextBox txtTLBD = NewTxt("1/1000"), txtTLTD = NewTxt("1/1000"), txtTLTN = NewTxt("1/200"), txtKC = NewTxt("350");
         readonly ComboBox cboCat = NewCombo(), cboBang = NewCombo(), cboXep = NewCombo(), cboHuong = NewCombo(), cboXuat = NewCombo();
-        readonly CheckBox chkBD = NewChk("Binh do", true), chkTD = NewChk("Trac doc", true), chkTN = NewChk("Trac ngang", true);
-        readonly CheckBox chkGop = NewChk("Gop BD+TD", false), chkAn = NewChk("An khung rai", false), chkNhieu = NewChk("Nhieu tuyen", false);
-        readonly TextBox preBD = NewTxt("BD - "), tenBD = NewTxt("BINH DO TUYEN");
-        readonly TextBox preTD = NewTxt("TD - "), tenTD = NewTxt("TRAC DOC TUYEN");
-        readonly TextBox preTN = NewTxt("TN - "), tenTN = NewTxt("TRAC NGANG TUYEN");
+        readonly CheckBox chkBD = NewChk("Bình đồ", true), chkTD = NewChk("Trắc dọc", true), chkTN = NewChk("Trắc ngang", true);
+        readonly CheckBox chkKhac = NewChk("Bản vẽ khác", true), chkGop = NewChk("Gộp bình đồ + trắc dọc", false), chkAn = NewChk("Ẩn khung rải", true), chkNhieu = NewChk("Nhiều tuyến — đóng khung + đánh số lần lượt từng tuyến", true);
+        readonly Panel morePanel = new Panel { BackColor = Color.Transparent, Visible = false };
+        readonly TextBox txtMau = NewTxt(""), txtChongMi = NewTxt("0"), txtLayer = NewTxt("GKIN-KHUNG"), txtBaiTo = NewTxt("4");
+        readonly CheckBox chkChongMi = NewChk("Chồng mí (mm)", false), chkBaiTo = NewChk("Bãi tờ (tờ/bản vẽ)", false);
+
+        readonly TextBox preBD = NewTxt("BĐ - "), tenBD = NewTxt("BÌNH ĐỒ TUYẾN");
+        readonly TextBox preTD = NewTxt("TĐ - "), tenTD = NewTxt("TRẮC DỌC TUYẾN");
+        readonly TextBox preTN = NewTxt("TN - "), tenTN = NewTxt("TRẮC NGANG TUYẾN");
         readonly ComboBox tagSTT = NewCombo(), kieuSTT = NewCombo(), tagMS = NewCombo(), kieuMS = NewCombo();
         readonly ComboBox tagBVS = NewCombo(), kieuBVS = NewCombo(), tagTen = NewCombo(), kieuTen = NewCombo();
         readonly ComboBox tagTL = NewCombo(), kieuTL = NewCombo();
         readonly TextBox txtSoBD = NewTxt("1"), txtSoCS = NewTxt("2");
+
         readonly ComboBox cboPC3 = NewCombo(), cboCTB = NewCombo(), cboCTBBD = NewCombo(), cboCTBTD = NewCombo(), cboCTBTN = NewCombo();
-        readonly CheckBox chkRieng = NewChk("Net rieng", false), chkMuc = NewChk("Muc luc", true), chkTach = NewChk("Tach PDF", false);
+        readonly CheckBox chkRieng = NewChk("Nét in riêng", true), chkBia = NewChk("Bìa", false), chkMuc = NewChk("Mục lục", true), chkTach = NewChk("Tách PDF từng loại", false);
         readonly TextBox txtPDF = NewTxt(""), txtInLai = NewTxt("");
-        readonly Label pills = NewLbl(".. Khung | .. BD | .. TD | .. TN", CLuc);
-        readonly Label status = NewLbl(" ", CPhu);
-        readonly Panel pg1 = new Panel { Dock = DockStyle.Fill, BackColor = CNen };
-        readonly Panel pg2 = new Panel { Dock = DockStyle.Fill, BackColor = CNen };
-        readonly Panel pg3 = new Panel { Dock = DockStyle.Fill, BackColor = CNen };
-        readonly Panel pg4 = new Panel { Dock = DockStyle.Fill, BackColor = CNen };
-        readonly Button[] tabs = new Button[4];
+
+        readonly PillLabel pillKhung = NewPill("✓ Khung", CXanh, 64);
+        readonly PillLabel pillBd = NewPill("BĐ 0", CXanh, 68);
+        readonly PillLabel pillTd = NewPill("TĐ 0 dải", CVang, 68);
+        readonly PillLabel pillTn = NewPill("TN 0 lưới", CTim, 72);
+        readonly PillLabel pillDau = NewPill("Đầu bảng 0/0", CVang, 90);
+        readonly PillLabel pillKem = NewPill("Kèm 0", CHong, 58);
+        readonly Label status = NewLbl("Sẵn sàng", CPhu);
+        readonly Panel pg1 = NewPage(), pg2 = NewPage(), pg3 = NewPage(), pg4 = NewPage();
+        readonly VerticalTabButton[] tabs = new VerticalTabButton[4];
+        readonly Panel footer = new Panel { Dock = DockStyle.Bottom, Height = 76, BackColor = CNen };
 
         public MainPanel()
         {
-            BackColor = CNen; ForeColor = CChu; Font = new System.Drawing.Font("Segoe UI", 8.25f); Dock = DockStyle.Fill;
-            var rail = new Panel { Dock = DockStyle.Right, Width = 36, BackColor = CNen };
-            string[] tn = { "Ban ve", "So to", "In PDF", "TT" };
-            Color[] tc = { CXanh, CTim, CCam, CLuc };
-            for (int i = 0; i < 4; i++)
+            SuspendLayout();
+            BackColor = CNen;
+            ForeColor = CChu;
+            Font = new Font("Segoe UI", 8.25f, FontStyle.Regular, GraphicsUnit.Point);
+            Dock = DockStyle.Fill;
+            MinimumSize = new Size(500, 420);
+            footer.Size = new Size(440, 76);
+
+            var brand = new BrandRail();
+            var rail = new Panel { Dock = DockStyle.Right, Width = 38, BackColor = Color.FromArgb(24, 35, 46), Padding = new Padding(2, 5, 2, 5) };
+            string[] names = { "Bản vẽ", "Đánh số tờ", "In PDF", "Thông tin" };
+            Color[] colors = { CXanh, CTim, CCam, CLuc };
+            for (int i = 0; i < tabs.Length; i++)
             {
-                int p = i + 1;
-                var b = new Button { Dock = DockStyle.Top, Height = 120, FlatStyle = FlatStyle.Flat, Text = tn[i], ForeColor = CChu, BackColor = Mix(tc[i], i == 0 ? 1 : 0.3), Font = new System.Drawing.Font("Segoe UI", 8, FontStyle.Bold) };
-                b.FlatAppearance.BorderSize = 0;
-                b.Click += (_, __) => ShowPage(p);
-                tabs[i] = b;
+                int page = i + 1;
+                var tab = new VerticalTabButton
+                {
+                    Text = names[i], AccentColor = colors[i],
+                    Dock = DockStyle.Top, Height = 96, Margin = new Padding(0)
+                };
+                tab.Click += (_, __) => ShowPage(page);
+                tabs[i] = tab;
             }
-            for (int i = 3; i >= 0; i--) rail.Controls.Add(tabs[i]);
-            var foot = new Panel { Dock = DockStyle.Bottom, Height = 88, BackColor = CNen };
-            pills.SetBounds(8, 4, 320, 18); status.SetBounds(8, 24, 320, 16);
-            var run = Act("THUC HIEN", CLucDam, 8, 46, 168);
-            var inn = Act("In", CCard, 182, 46, 56); inn.ForeColor = CCam;
-            var dol = Act("Do lai", CCard, 244, 46, 72); dol.ForeColor = CXanh;
+            for (int i = tabs.Length - 1; i >= 0; i--) rail.Controls.Add(tabs[i]);
+
+            var pills = new FlowLayoutPanel
+            {
+                Left = 6, Top = 1, Height = 22, Width = 430,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.Transparent, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty
+            };
+            pills.Controls.AddRange(new Control[] { pillKhung, pillBd, pillTd, pillTn, pillDau, pillKem });
+            status.SetBounds(8, 23, 422, 16);
+            status.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            status.Font = new Font("Segoe UI", 7.25f);
+            var run = Act("▶  THỰC HIỆN", Color.FromArgb(24, 177, 91));
+            var print = Act("In ▸", CCard); print.ForeColor = CCam; print.FlatAppearance.BorderColor = CCam; print.FlatAppearance.BorderSize = 1;
+            var rescan = Act("↻  Dò lại", CCard); rescan.ForeColor = CXanh; rescan.FlatAppearance.BorderColor = CXanh; rescan.FlatAppearance.BorderSize = 1;
+            run.SetBounds(7, 41, 238, 32);
+            print.SetBounds(252, 41, 79, 32);
+            rescan.SetBounds(338, 41, 96, 32);
+            run.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            print.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            rescan.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             run.Click += (_, __) => ThucHien();
-            inn.Click += (_, __) => ShowPage(3);
-            dol.Click += (_, __) => DoLai();
-            foot.Controls.AddRange(new Control[] { pills, status, run, inn, dol });
+            print.Click += (_, __) => ShowPage(3);
+            rescan.Click += (_, __) => DoLai();
+            footer.Controls.AddRange(new Control[] { pills, status, run, print, rescan });
+
             Build1(); Build2(); Build3(); Build4(); FillCombos();
-            var body = new Panel { Dock = DockStyle.Fill, BackColor = CNen };
+            var body = new Panel { Dock = DockStyle.Fill, BackColor = CNen, Padding = new Padding(5, 5, 5, 1) };
             body.Controls.AddRange(new Control[] { pg4, pg3, pg2, pg1 });
-            Controls.Add(body); Controls.Add(foot); Controls.Add(rail);
+            var workspace = new Panel { Dock = DockStyle.Fill, BackColor = CNen };
+            workspace.Controls.Add(body);
+            workspace.Controls.Add(footer);
+            Controls.Add(workspace);
+            Controls.Add(rail);
+            Controls.Add(brand);
             ShowPage(1);
+            CapNhat();
+            ResumeLayout(true);
         }
+
+        static Panel NewPage() => new Panel { Dock = DockStyle.Fill, BackColor = CNen };
+        static PillLabel NewPill(string text, Color color, int width) => new PillLabel { Text = text, AccentColor = color, Width = width, Margin = new Padding(0, 0, 3, 0) };
     }
 }

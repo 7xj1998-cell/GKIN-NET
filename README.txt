@@ -1,10 +1,14 @@
-GKIN — APPLOAD GKIN.lsp (kem GKIN.dll)
+GKIN v0.3.0 — GHÉP KHUNG, IN NHANH
 
-1. Tai GKIN-APPLOAD.zip tu Releases:
+1. Tải GKIN-APPLOAD.zip tại:
    https://github.com/7xj1998-cell/GKIN-NET/releases
-2. Giai nen GKIN.lsp + GKIN.dll vao CUNG 1 thu muc.
-3. AutoCAD 2021-2024: APPLOAD -> chon GKIN.lsp
-4. Go GKIN
+2. Giải nén TOÀN BỘ tệp vào CÙNG một thư mục; giữ các DLL đi kèm GKIN.dll.
+3. AutoCAD 2021–2024: APPLOAD → chọn GKIN.lsp.
+4. Gõ GKIN để mở bảng công cụ; gõ GKINDO để quét lại.
 
-Luu y: che do LAYOUT da tao khung + viewport. Hai che do MODEL dang khoa
-cho den khi engine sao chep/cat hinh hoc duoc kiem thu trong AutoCAD.
+Chức năng chính:
+- Tạo tờ trong MODEL hoặc LAYOUT.
+- Đánh số và ghi thuộc tính khung tên.
+- In một PDF nhiều trang, tách theo loại hoặc in lại tờ 2,5-7.
+
+Khuyến nghị: thử trên bản sao DWG trước khi dùng cho hồ sơ đang sản xuất.

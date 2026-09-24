@@ -24,6 +24,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item bin/GKIN.dll dist/GKIN.dll
+          Copy-Item bin/PdfSharp.dll dist/PdfSharp.dll
+          Copy-Item bin/PdfSharp.Charting.dll dist/PdfSharp.Charting.dll
           Copy-Item GKIN.lsp dist/GKIN.lsp
           Copy-Item README.txt dist/README.txt
           Compress-Archive -Path dist/* -DestinationPath GKIN-APPLOAD.zip -Force

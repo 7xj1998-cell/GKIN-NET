@@ -17,13 +17,13 @@ namespace GKIN
         {
             if (_ps != null) return;
             _panel = new MainPanel();
-            _ps = new PaletteSet("GKIN — Ghep khung, in nhanh")
+            _ps = new PaletteSet("GKIN — Ghép khung, in nhanh")
             {
                 Style = PaletteSetStyles.ShowCloseButton
                     | PaletteSetStyles.ShowAutoHideButton
                     | PaletteSetStyles.Snappable,
-                MinimumSize = new System.Drawing.Size(360, 480),
-                Size = new System.Drawing.Size(400, 680),
+                MinimumSize = new System.Drawing.Size(500, 420),
+                Size = new System.Drawing.Size(520, 460),
                 DockEnabled = DockSides.Left | DockSides.Right,
                 KeepFocus = true
             };
@@ -66,15 +66,27 @@ namespace GKIN
             try { _panel.DoLai(); }
             catch (System.Exception ex)
             {
-                _panel.Toast("Loi do: " + ex.Message);
+                _panel.Toast("Lỗi dò: " + ex.Message);
             }
+        }
+
+        public static void Hide()
+        {
+            if (_ps != null) _ps.Visible = false;
         }
 
         public static void RescanFromCommand()
         {
-            Ensure();
-            _panel.DoLai();
-            AcadApp.DocumentManager.MdiActiveDocument?.Editor.WriteMessage("\n[GKIN] Da do xong.");
+            if (_panel != null)
+                _panel.DoLai();
+            else
+            {
+                CadEngine.QuetKhung();
+                CadEngine.QuetBinhDo(out _, out _);
+                CadEngine.QuetTracDocKm(out _);
+                CadEngine.QuetTracNgang(out _);
+            }
+            AcadApp.DocumentManager.MdiActiveDocument?.Editor.WriteMessage("\n[GKIN] Đã dò xong.");
         }
 
         public static void AllowPick(Action pick)

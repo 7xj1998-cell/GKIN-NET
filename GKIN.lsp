@@ -1,5 +1,5 @@
-;;; GKIN.lsp — nap GKIN.dll bang APPLOAD
-;;; Dat GKIN.lsp va GKIN.dll CUNG THU MUC.
+;;; GKIN.lsp — nạp GKIN.dll bằng APPLOAD
+;;; Đặt GKIN.lsp và GKIN.dll CÙNG THƯ MỤC.
 (vl-load-com)
 
 (defun gkin:dll (/ f l)
@@ -9,12 +9,12 @@
   f)
 
 (defun gkin:cmd (args / r)
-  ;; COMMAND khong phai first-class function tren mot so ban AutoCAD.
-  ;; VL-CMDF co the truyen an toan vao VL-CATCH-ALL-APPLY.
+  ;; COMMAND không phải first-class function trên một số bản AutoCAD.
+  ;; VL-CMDF có thể truyền an toàn vào VL-CATCH-ALL-APPLY.
   (setq r (vl-catch-all-apply 'vl-cmdf args))
   (if (vl-catch-all-error-p r)
     (progn
-      (princ (strcat "\n[GKIN] Loi: " (vl-catch-all-error-message r)))
+      (princ (strcat "\n[GKIN] Lỗi: " (vl-catch-all-error-message r)))
       nil)
     T))
 
@@ -26,21 +26,21 @@
   (cond
     ((null f)
      (alert (strcat
-       "GKIN: khong thay GKIN.dll\n\n"
-       "Tai GKIN-APPLOAD.zip tu GitHub Releases\n"
+       "GKIN: không thấy GKIN.dll\n\n"
+       "Tải GKIN-APPLOAD.zip từ GitHub Releases\n"
        "https://github.com/7xj1998-cell/GKIN-NET/releases\n"
-       "Giai nen GKIN.dll canh file GKIN.lsp nay.")))
+       "Giải nén GKIN.dll cạnh file GKIN.lsp này.")))
     ((not (gkin:netload f))
-     (alert "GKIN: khong nap duoc GKIN.dll. Xem dong lenh de biet chi tiet."))
+     (alert "GKIN: không nạp được GKIN.dll. Xem dòng lệnh để biết chi tiết."))
     ((not (gkin:cmd (list "GKINUI")))
-     (alert "GKIN: DLL da nap nhung khong goi duoc lenh GKINUI.")))
+     (alert "GKIN: DLL đã nạp nhưng không gọi được lệnh GKINUI.")))
   (princ))
 
 (defun C:GKINDO ()
   (if (and (gkin:dll) (gkin:netload (gkin:dll)))
     (gkin:cmd (list "GKINDONET"))
-    (alert "GKIN: khong nap duoc GKIN.dll."))
+    (alert "GKIN: không nạp được GKIN.dll."))
   (princ))
 
-(princ "\nGKIN.lsp da nap. Go GKIN de mo palette .NET (can GKIN.dll).")
+(princ "\nGKIN.lsp đã nạp. Gõ GKIN để mở palette .NET (cần GKIN.dll).")
 (princ)
