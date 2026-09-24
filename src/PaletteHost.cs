@@ -10,6 +10,7 @@ namespace GKIN
         static PaletteSet _ps;
         static MainPanel _panel;
         static bool _eventsAttached;
+        static bool _picking;
 
         public static MainPanel Panel => _panel;
 
@@ -22,10 +23,10 @@ namespace GKIN
                 Style = PaletteSetStyles.ShowCloseButton
                     | PaletteSetStyles.ShowAutoHideButton
                     | PaletteSetStyles.Snappable,
-                MinimumSize = new System.Drawing.Size(480, 520),
-                Size = new System.Drawing.Size(560, 640),
+                MinimumSize = new System.Drawing.Size(400, 460),
+                Size = new System.Drawing.Size(430, 560),
                 DockEnabled = DockSides.Left | DockSides.Right,
-                KeepFocus = true
+                KeepFocus = false
             };
             _ps.Add("GKIN", _panel);
             AttachDocumentEvents();
@@ -41,6 +42,7 @@ namespace GKIN
 
         static void OnDocumentActivated(object sender, DocumentCollectionEventArgs e)
         {
+            if (_picking) return;
             _panel?.OnDocumentChanged(e.Document);
         }
 
@@ -62,7 +64,6 @@ namespace GKIN
         {
             Ensure();
             _ps.Visible = true;
-            _ps.KeepFocus = true;
             try { _panel.DoLai(); }
             catch (System.Exception ex)
             {
@@ -77,11 +78,33 @@ namespace GKIN
 
         public static void AllowPick(Action pick)
         {
-            if (_ps != null) _ps.KeepFocus = false;
-            try { pick(); }
+            var doc = AcadApp.DocumentManager.MdiActiveDocument;
+            if (doc == null || pick == null) return;
+            _picking = true;
+            bool visible = _ps != null && _ps.Visible;
+            try
+            {
+                if (_ps != null)
+                {
+                    _ps.KeepFocus = false;
+                    _ps.Visible = false;
+                }
+                try { Autodesk.AutoCAD.Internal.Utils.SetFocusToDwgView(); }
+                catch { }
+                try { doc.Window.Focus(); } catch { }
+                using (doc.Editor.StartUserInteraction(_panel))
+                {
+                    pick();
+                }
+            }
             finally
             {
-                if (_ps != null) _ps.KeepFocus = true;
+                _picking = false;
+                if (_ps != null)
+                {
+                    _ps.Visible = visible;
+                    _ps.KeepFocus = false;
+                }
             }
         }
     }
