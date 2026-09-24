@@ -35,6 +35,10 @@ namespace GKIN
             Row(grid, "Khoảng cách (m)", txtKC);
             cboCat.SelectedIndexChanged += (_, __) => { txtKC.Enabled = cboCat.SelectedIndex == 0; CapNhat(); };
             Row(grid, "Xếp trắc ngang", cboHuong);
+            Row(grid, "Dải bình đồ mỗi tờ", txtBdDai);
+            Row(grid, "Trắc ngang mỗi tờ", txtTnMoi);
+            hint.SetToolTip(txtBdDai, "Layout: mỗi tờ bình đồ có bấy nhiêu dải viewport, xếp trên/dưới. Bản gốc thường là 2.");
+            hint.SetToolTip(txtTnMoi, "Số mặt cắt trên một tờ. Ví dụ 4.");
             Row(grid, "Xuất ra", cboXuat);
 
             var flags = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Color.Transparent, Margin = Padding.Empty };
@@ -99,7 +103,7 @@ namespace GKIN
             Row(fieldGrid, "Tỷ lệ", tagTL, kieuTL);
             Row(fieldGrid, "Số bắt đầu", txtSoBD);
             Row(fieldGrid, "Số chữ số", txtSoCS);
-            var note = NewWrap("Ví dụ trắc dọc 8 tờ: STT 08–15, MSBV TĐ - 01 đến TĐ - 08, BVS 01/08 đến 08/08. TENBVE lấy tên loại. TYLE lấy tỷ lệ từng loại.", CPhu);
+            var note = NewWrap("Tên thẻ trong block khung, đúng chữ:\r\nSTT = số tờ.\r\nSBV hoặc MSBV = mã tờ, ví dụ BĐ - 01.\r\nTENBV hoặc TENBVE = tên bản vẽ.\r\nBVS = tờ/tổng, ví dụ 01/08. Không có thẻ thì chọn không ghi.\r\nTYLE = tỷ lệ, ví dụ 1/1000.\r\nChỉ ghi các tờ vừa tạo. Tờ cũ không bị đè. Muốn nối số thì sửa Số bắt đầu.", CPhu);
             Span(fieldGrid, note);
             Place(fields, fieldGrid);
             Mount(pg2, names, fields);
@@ -146,7 +150,7 @@ namespace GKIN
             var title = NewWrap("GKIN — Ghép khung, in nhanh", CChu);
             title.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
             Span(grid, title);
-            Span(grid, NewWrap("Gõ GKIN để mở bảng này.\r\n\r\n1. Bản vẽ — bấm Dò lại, hoặc Chọn nếu dò chưa đúng.\r\n2. THỰC HIỆN ở tab Bản vẽ — tạo tờ trong Model hoặc Layout.\r\n3. Đánh số — chọn thẻ khung tên, rồi THỰC HIỆN.\r\n4. In PDF — chọn file, rồi THỰC HIỆN. Nút In chỉ mở tab này.\r\n\r\nAutoCAD 2021–2024. Nên thử trên bản sao của bản vẽ.", CPhu));
+            Span(grid, NewWrap("Gõ GKIN để mở bảng này.\r\n\r\n1. Bản vẽ — Dò lại. Xuất LAYOUT để cắt tuyến thành từng tờ như bản gốc.\r\n2. THỰC HIỆN — mỗi tờ một layout, viewport cắt theo khoảng cách mét.\r\n3. Đánh số — chỉ ghi thẻ STT, SBV, TENBV, TYLE của các tờ vừa tạo.\r\n4. In PDF.\r\n\r\nAutoCAD 2021–2024. Nên thử trên bản sao của bản vẽ.", CPhu));
             var open = Mini("Mở thư mục PDF");
             open.Click += (_, __) => OpenOutputFolder();
             var close = Mini("Đóng bảng");
@@ -169,7 +173,7 @@ namespace GKIN
             Fill(kieuBVS, "từng loại → 01/09", "cả bộ", "không ghi");
             Fill(kieuTen, "tên + lý trình từng tờ", "chỉ tên", "không ghi");
             Fill(kieuTL, "ngang; đứng (TĐ tự dò)", "một tỷ lệ", "không ghi");
-            cboXuat.SelectedIndex = 1;
+            cboXuat.SelectedIndex = 2;
         }
 
         public void DoLai()
@@ -277,7 +281,7 @@ namespace GKIN
         int SoToTN()
         {
             if (!_hasTn) return 0;
-            return (int)Math.Ceiling(_tnItems.Count / 4.0);
+            return (int)Math.Ceiling(_tnItems.Count / Math.Max(1, Number(txtTnMoi.Text, 4)));
         }
 
         void Tay(char loai)
@@ -354,7 +358,9 @@ namespace GKIN
                 if (cboXuat.SelectedIndex == 2)
                 {
                     _layoutSheets = CadEngine.CreateLayouts(sampleFrame, chkBD.Checked ? _bdExt : null, chkTD.Checked ? _tdExt : null,
-                        chkTN.Checked ? _tnItems : null, ntd, tdLength, tdStep, chkGop.Checked, cboHuong.SelectedIndex == 1, out string error);
+                        chkTN.Checked ? _tnItems : null, ntd, tdLength, tdStep, chkGop.Checked, cboHuong.SelectedIndex == 1,
+                        chkBD.Checked ? _bd : ObjectId.Null, Math.Max(1, (int)Number(txtBdDai.Text, 2)), Math.Max(1, (int)Number(txtTnMoi.Text, 4)),
+                        out string error);
                     _modelTdSheets = 0;
                     if (importedSample && _layoutSheets.Count > 0)
                     {
@@ -375,6 +381,7 @@ namespace GKIN
                 var made = CadEngine.CreateModelSheets(sampleFrame, chkBD.Checked ? _bdExt : null, chkTD.Checked ? _tdExt : null,
                     chkTN.Checked ? _tnItems : null, ntd, tdLength, tdStep, chkGop.Checked, cboHuong.SelectedIndex == 1,
                     cboXuat.SelectedIndex == 1, txtLayer.Text, overlap, sheetsPerRow, chkAn.Checked, origin,
+                    chkBD.Checked ? _bd : ObjectId.Null, Math.Max(1, (int)Number(txtBdDai.Text, 2)), Math.Max(1, (int)Number(txtTnMoi.Text, 4)),
                     out _modelTdSheets, out string modelError);
                 _layoutSheets.Clear();
                 if (importedSample && made.Count > 0)
@@ -393,15 +400,16 @@ namespace GKIN
 
         void DanhSo()
         {
-            bool useLayouts = cboXuat.SelectedIndex == 2;
-            if (useLayouts) _layoutSheets = CadEngine.ScanLayoutSheets();
-            if (useLayouts && _layoutSheets.Count == 0) { Toast("Không thấy layout GKIN-BD, GKIN-TD hoặc GKIN-TN trong bản vẽ."); return; }
-            var frames = useLayouts ? _layoutSheets.ConvertAll(x => x.FrameId) : CadEngine.KhungRai(_khung);
-            if (frames.Count == 0) { Toast("Không thấy khung rải."); return; }
-            int nbd = useLayouts ? _layoutSheets.Count(x => x.Type == "BD") : (_hasBd && !chkGop.Checked ? 1 : 0);
-            int ntd = useLayouts ? _layoutSheets.Count(x => x.Type == "TD") : (_modelTdSheets > 0 ? _modelTdSheets : SoToTD());
-            int ntn = useLayouts ? _layoutSheets.Count(x => x.Type == "TN") : SoToTN();
-            if (frames.Count != nbd + ntd + ntn) ntn = Math.Max(0, frames.Count - nbd - ntd);
+            var frames = CadEngine.LastFrames;
+            var types = CadEngine.LastTypes;
+            if (frames == null || types == null || frames.Count == 0 || types.Count != frames.Count)
+            {
+                Toast("Chỉ đánh số các tờ vừa tạo. Bấm THỰC HIỆN ở tab Bản vẽ trước.");
+                return;
+            }
+            int nbd = types.Count(x => x == "BD");
+            int ntd = types.Count(x => x == "TD");
+            int ntn = types.Count(x => x == "TN");
             int sobd = Math.Max(1, (int)Number(txtSoBD.Text, 1)), cs = Math.Max(1, (int)Number(txtSoCS.Text, 2));
             double kc = Number(txtKC.Text, 350);
             int cntBD = sobd, cntTD = sobd, cntTN = sobd, idxAll = sobd;
@@ -410,7 +418,8 @@ namespace GKIN
             var updates = new List<KeyValuePair<ObjectId, Dictionary<string, string>>>();
             for (int i = 0; i < frames.Count; i++)
             {
-                string loai = useLayouts ? _layoutSheets[i].Type : i < nbd ? "BD" : i < nbd + ntd ? "TD" : "TN";
+                string loai = types[i];
+                if (loai != "BD" && loai != "TD" && loai != "TN") continue;
                 int idxL = loai == "BD" ? cntBD : loai == "TD" ? cntTD : cntTN;
                 var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 AddField(values, tagSTT, kieuSTT, kieuSTT.SelectedIndex == 0 ? CadEngine.Pad(idxAll, cs) : CadEngine.Pad(idxL, cs));

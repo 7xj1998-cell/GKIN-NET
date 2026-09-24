@@ -49,7 +49,19 @@ namespace GKIN
             public string Type;
             public int Index;
             public bool StackVertical = true;
+            public int Slots = 1;
             public List<Extents3d> Windows = new List<Extents3d>();
+            public List<double> Twist = new List<double>();
+            public List<Point3d> Look = new List<Point3d>();
+            public List<double> Span = new List<double>();
+        }
+
+        sealed class Strip
+        {
+            public Extents3d Ext;
+            public Point3d Look;
+            public double Twist;
+            public double Span;
         }
 
         static readonly Regex StationRegex = new Regex(@"(?<![A-Z0-9])KM\s*\d+\s*\+\s*\d{1,3}(?:[\.,]\d+)?(?!\d)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -59,6 +71,8 @@ namespace GKIN
         public static Editor Ed => Doc?.Editor;
         public static Database Db => Doc?.Database;
         public static string LastError { get; private set; }
+        public static List<ObjectId> LastFrames { get; private set; } = new List<ObjectId>();
+        public static List<string> LastTypes { get; private set; } = new List<string>();
 
         public static bool SameDatabase(Database first, Database second)
         {
@@ -736,6 +750,7 @@ namespace GKIN
             ObjectId sampleFrame, Extents3d? bd, Extents3d? td, IList<Extents3d> tnItems,
             int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn, bool rowLayout,
             string layerName, double overlap, int sheetsPerRow, bool hideCopiedGeometry, Point3d? origin,
+            ObjectId bdCurve, int bdPerSheet, int tnPerSheet,
             out int tdCreated, out string error)
         {
             error = null;
@@ -747,7 +762,7 @@ namespace GKIN
                 return result;
             }
 
-            var plans = BuildSheetPlans(bd, td, tnItems, tdCount, tdLength, tdStep, mergeBdTd, verticalTn);
+            var plans = BuildSheetPlans(bdCurve, bd, td, tnItems, tdCount, tdLength, tdStep, mergeBdTd, verticalTn, bdPerSheet, tnPerSheet);
             if (plans.Count == 0)
             {
                 error = "Không tìm thấy vùng nguồn bình đồ, trắc dọc hoặc trắc ngang.";
@@ -861,6 +876,8 @@ namespace GKIN
                     Db.TransactionManager.QueueForGraphicsFlush();
                     if (skipped > 0)
                         error = "Đã bỏ qua " + skipped + " đối tượng không sao chép được (xref, viewport hoặc proxy).";
+                    LastFrames = new List<ObjectId>(result);
+                    LastTypes = plans.Take(result.Count).Select(p => p.Type).ToList();
                 }
                 catch (System.Exception ex)
                 {
@@ -1056,7 +1073,8 @@ namespace GKIN
 
         public static List<LayoutSheetInfo> CreateLayouts(
             ObjectId sampleFrame, Extents3d? bd, Extents3d? td, IList<Extents3d> tnItems,
-            int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn, out string error)
+            int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn,
+            ObjectId bdCurve, int bdPerSheet, int tnPerSheet, out string error)
         {
             error = null;
             var result = new List<LayoutSheetInfo>();
@@ -1066,7 +1084,7 @@ namespace GKIN
                 return result;
             }
 
-            var plans = BuildSheetPlans(bd, td, tnItems, tdCount, tdLength, tdStep, mergeBdTd, verticalTn);
+            var plans = BuildSheetPlans(bdCurve, bd, td, tnItems, tdCount, tdLength, tdStep, mergeBdTd, verticalTn, bdPerSheet, tnPerSheet);
             if (plans.Count == 0)
             {
                 error = "Không tìm thấy vùng nguồn BĐ/TĐ/TN để tạo Layout.";
@@ -1120,38 +1138,51 @@ namespace GKIN
 
                                 double frameWidth = Math.Max(1.0, frameExt.MaxPoint.X - frameExt.MinPoint.X);
                                 double frameHeight = Math.Max(1.0, frameExt.MaxPoint.Y - frameExt.MinPoint.Y);
-                                double usableWidth = frameWidth * 0.76;
-                                double usableHeight = frameHeight * 0.88;
+                                double marginL = 0.03, marginR = 0.03, marginT = 0.04, marginB = 0.20;
+                                double usableWidth = frameWidth * (1 - marginL - marginR);
+                                double usableHeight = frameHeight * (1 - marginT - marginB);
+                                double left = frameExt.MinPoint.X + frameWidth * marginL;
+                                double bottom = frameExt.MinPoint.Y + frameHeight * marginB;
                                 int windowCount = Math.Max(1, plan.Windows.Count);
+                                int slots = Math.Max(plan.Slots, windowCount);
                                 bool horizontal = plan.Type == "TN" && !plan.StackVertical && windowCount > 1;
-                                double viewportWidth = horizontal ? usableWidth / windowCount * 0.94 : usableWidth;
-                                double viewportHeight = horizontal ? usableHeight : usableHeight / windowCount * 0.94;
+                                double viewportWidth = horizontal ? usableWidth / windowCount * 0.96 : usableWidth * 0.98;
+                                double viewportHeight = horizontal
+                                    ? usableHeight * 0.96
+                                    : (plan.Type == "BD" ? usableHeight / slots : windowCount > 1 ? usableHeight / windowCount : usableHeight) * 0.94;
+                                double usedHeight = horizontal ? viewportHeight : viewportHeight * windowCount;
+                                double yBase = bottom + Math.Max(0, usableHeight - usedHeight) / 2.0;
 
                                 for (int i = 0; i < plan.Windows.Count; i++)
                                 {
-                                    var source = Expand(plan.Windows[i], 0.03, 0.05);
+                                    var source = plan.Windows[i];
                                     double centerX = horizontal
-                                        ? frameWidth * 0.04 + usableWidth / windowCount * (i + 0.5)
-                                        : frameWidth * 0.04 + usableWidth / 2.0;
+                                        ? left + usableWidth / windowCount * (i + 0.5)
+                                        : left + usableWidth / 2.0;
                                     double centerY = horizontal
-                                        ? frameHeight * 0.06 + usableHeight / 2.0
-                                        : frameHeight * 0.06 + usableHeight / windowCount * (i + 0.5);
+                                        ? yBase + viewportHeight / 2.0
+                                        : yBase + viewportHeight * (windowCount - 1 - i) + viewportHeight / 2.0;
+                                    Point3d look = i < plan.Look.Count
+                                        ? plan.Look[i]
+                                        : new Point3d((source.MinPoint.X + source.MaxPoint.X) / 2.0, (source.MinPoint.Y + source.MaxPoint.Y) / 2.0, 0);
+                                    double twist = i < plan.Twist.Count ? plan.Twist[i] : 0;
+                                    double span = i < plan.Span.Count ? plan.Span[i] : 0;
                                     var viewport = new Viewport
                                     {
                                         CenterPoint = new Point3d(centerX, centerY, 0),
-                                        Width = viewportWidth,
-                                        Height = viewportHeight,
+                                        Width = Math.Max(1, viewportWidth),
+                                        Height = Math.Max(1, viewportHeight),
                                         ViewCenter = Point2d.Origin,
-                                        ViewTarget = new Point3d(
-                                            (source.MinPoint.X + source.MaxPoint.X) / 2.0,
-                                            (source.MinPoint.Y + source.MaxPoint.Y) / 2.0,
-                                            (source.MinPoint.Z + source.MaxPoint.Z) / 2.0),
+                                        ViewTarget = look,
                                         ViewDirection = Vector3d.ZAxis,
-                                        TwistAngle = 0
+                                        TwistAngle = twist
                                     };
                                     double sourceWidth = Math.Max(1e-6, source.MaxPoint.X - source.MinPoint.X);
                                     double sourceHeight = Math.Max(1e-6, source.MaxPoint.Y - source.MinPoint.Y);
-                                    viewport.ViewHeight = Math.Max(sourceHeight, sourceWidth / (viewportWidth / viewportHeight)) * 1.03;
+                                    double viewHeight = span > 1
+                                        ? span * viewport.Height / viewport.Width
+                                        : Math.Max(sourceHeight, sourceWidth / (viewport.Width / viewport.Height)) * 1.03;
+                                    viewport.ViewHeight = Math.Max(1e-6, viewHeight);
                                     paper.AppendEntity(viewport);
                                     tr.AddNewlyCreatedDBObject(viewport, true);
                                     viewportIds.Add(viewport.ObjectId);
@@ -1194,6 +1225,8 @@ namespace GKIN
                     catch { }
                 }
             }
+            LastFrames = result.Select(x => x.FrameId).ToList();
+            LastTypes = result.Select(x => x.Type).ToList();
             return result;
         }
 
@@ -1223,12 +1256,27 @@ namespace GKIN
             }
         }
 
-        static List<SheetPlan> BuildSheetPlans(Extents3d? bd, Extents3d? td, IList<Extents3d> tnItems,
-            int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn)
+        static List<SheetPlan> BuildSheetPlans(ObjectId bdCurve, Extents3d? bd, Extents3d? td, IList<Extents3d> tnItems,
+            int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn, int bdPerSheet, int tnPerSheet)
         {
             var plans = new List<SheetPlan>();
             if (bd != null && !(mergeBdTd && td != null))
-                plans.Add(new SheetPlan { Type = "BD", Index = 1, Windows = new List<Extents3d> { bd.Value } });
+            {
+                var strips = CutAlignment(bdCurve, bd.Value, tdStep);
+                int per = Math.Max(1, bdPerSheet);
+                for (int i = 0; i < strips.Count; i += per)
+                {
+                    var plan = new SheetPlan { Type = "BD", Index = i / per + 1, StackVertical = true, Slots = per };
+                    foreach (var strip in strips.Skip(i).Take(per))
+                    {
+                        plan.Windows.Add(strip.Ext);
+                        plan.Twist.Add(strip.Twist);
+                        plan.Look.Add(strip.Look);
+                        plan.Span.Add(strip.Span);
+                    }
+                    plans.Add(plan);
+                }
+            }
             if (td != null)
             {
                 var windows = tdStep > 0 && tdLength > 0
@@ -1236,7 +1284,7 @@ namespace GKIN
                     : Split(td.Value, Math.Max(1, tdCount), false);
                 for (int i = 0; i < windows.Count; i++)
                 {
-                    var plan = new SheetPlan { Type = "TD", Index = i + 1, Windows = new List<Extents3d> { windows[i] } };
+                    var plan = new SheetPlan { Type = "TD", Index = i + 1, Windows = new List<Extents3d> { windows[i] }, Slots = 1 };
                     if (mergeBdTd && bd != null && i == 0) plan.Windows.Insert(0, bd.Value);
                     plans.Add(plan);
                 }
@@ -1246,16 +1294,62 @@ namespace GKIN
                 var ordered = verticalTn
                     ? tnItems.OrderByDescending(x => x.MaxPoint.Y).ThenBy(x => x.MinPoint.X).ToList()
                     : tnItems.OrderBy(x => x.MinPoint.X).ThenByDescending(x => x.MaxPoint.Y).ToList();
-                for (int i = 0; i < ordered.Count; i += 4)
+                int per = Math.Max(1, tnPerSheet);
+                for (int i = 0; i < ordered.Count; i += per)
                     plans.Add(new SheetPlan
                     {
                         Type = "TN",
-                        Index = i / 4 + 1,
+                        Index = i / per + 1,
                         StackVertical = verticalTn,
-                        Windows = ordered.Skip(i).Take(4).ToList()
+                        Slots = per,
+                        Windows = ordered.Skip(i).Take(per).ToList()
                     });
             }
             return plans;
+        }
+
+        static List<Strip> CutAlignment(ObjectId curveId, Extents3d full, double step)
+        {
+            var whole = new Strip
+            {
+                Ext = full,
+                Look = new Point3d((full.MinPoint.X + full.MaxPoint.X) / 2.0, (full.MinPoint.Y + full.MaxPoint.Y) / 2.0, 0),
+                Twist = 0,
+                Span = Math.Max(1, full.MaxPoint.X - full.MinPoint.X)
+            };
+            if (step <= 1 || curveId.IsNull || curveId.Database == null) return new List<Strip> { whole };
+            try
+            {
+                using (var tr = curveId.Database.TransactionManager.StartOpenCloseTransaction())
+                {
+                    if (tr.GetObject(curveId, OpenMode.ForRead, false) is not Curve curve) return new List<Strip> { whole };
+                    double len = curve.GetDistanceAtParameter(curve.EndParam);
+                    if (len < 1) return new List<Strip> { whole };
+                    var list = new List<Strip>();
+                    int count = Math.Max(1, (int)Math.Ceiling(len / step));
+                    for (int i = 0; i < count; i++)
+                    {
+                        double d0 = Math.Min(len, i * step);
+                        double d1 = Math.Min(len, (i + 1) * step);
+                        if (d1 - d0 < 1) continue;
+                        var p0 = curve.GetPointAtDist(d0);
+                        var p1 = curve.GetPointAtDist(d1);
+                        var mid = curve.GetPointAtDist((d0 + d1) / 2.0);
+                        var ext = new Extents3d(p0, p0);
+                        for (int s = 0; s <= 8; s++)
+                            ext.AddPoint(curve.GetPointAtDist(Math.Min(len, d0 + (d1 - d0) * s / 8.0)));
+                        list.Add(new Strip
+                        {
+                            Ext = Expand(ext, 0.35, 0.35),
+                            Look = mid,
+                            Twist = -Math.Atan2(p1.Y - p0.Y, p1.X - p0.X),
+                            Span = Math.Max(1, (d1 - d0) * 1.06)
+                        });
+                    }
+                    return list.Count > 0 ? list : new List<Strip> { whole };
+                }
+            }
+            catch { return new List<Strip> { whole }; }
         }
 
         static List<Extents3d> SplitByDistance(Extents3d source, double totalLength, double step)

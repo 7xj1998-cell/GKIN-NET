@@ -24,8 +24,8 @@ namespace GKIN
                 Style = PaletteSetStyles.ShowCloseButton
                     | PaletteSetStyles.ShowAutoHideButton
                     | PaletteSetStyles.Snappable,
-                MinimumSize = new System.Drawing.Size(400, 460),
-                Size = new System.Drawing.Size(430, 560),
+                MinimumSize = new System.Drawing.Size(440, 720),
+                Size = new System.Drawing.Size(480, 960),
                 DockEnabled = DockSides.Left | DockSides.Right,
                 KeepFocus = false
             };
@@ -65,6 +65,8 @@ namespace GKIN
         public static void Show()
         {
             Ensure();
+            if (_ps.Size.Width < 460 || _ps.Size.Height < 900)
+                _ps.Size = new System.Drawing.Size(Math.Max(480, _ps.Size.Width), Math.Max(960, _ps.Size.Height));
             _ps.Visible = true;
             try { _panel.DoLai(); }
             catch (System.Exception ex)

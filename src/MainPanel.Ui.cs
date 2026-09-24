@@ -41,6 +41,7 @@ namespace GKIN
         readonly Label stTd = NewLbl("—", CLuc);
         readonly Label stTn = NewLbl("—", CLuc);
         readonly TextBox txtTLBD = NewTxt("1/1000"), txtTLTD = NewTxt("1/1000"), txtTLTN = NewTxt("1/200"), txtKC = NewTxt("350");
+        readonly TextBox txtBdDai = NewTxt("2"), txtTnMoi = NewTxt("4");
         readonly ComboBox cboCat = NewCombo(), cboHuong = NewCombo(), cboXuat = NewCombo();
         readonly CheckBox chkBD = NewChk("Bình đồ", true), chkTD = NewChk("Trắc dọc", true), chkTN = NewChk("Trắc ngang", true);
         readonly CheckBox chkGop = NewChk("Gộp bình đồ + trắc dọc", false), chkAn = NewChk("Không in hình sao chép", false);
