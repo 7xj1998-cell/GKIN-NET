@@ -15,15 +15,5 @@ namespace GKIN
     {
         [CommandMethod("GKIN", CommandFlags.Session)]
         public void ShowUi() => PaletteHost.Show();
-
-        [CommandMethod("GKINUI", CommandFlags.Session)]
-        public void ShowUiAlias() => PaletteHost.Show();
-
-        [CommandMethod("GKINDO", CommandFlags.Modal)]
-        public void Rescan()
-        {
-            PaletteHost.Ensure();
-            PaletteHost.Panel?.DoLai();
-        }
     }
 }

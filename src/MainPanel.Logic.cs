@@ -219,6 +219,7 @@ namespace GKIN
 
         void ResetState(Database db)
         {
+            CadEngine.ClearTransientSheets();
             _stateDb = db; _frames.Clear(); _khung = null; _kt = ObjectId.Null; _bd = ObjectId.Null; _def = ObjectId.Null;
             _bdExt = _tdExt = _tnExt = null; _tnItems.Clear(); _layoutSheets.Clear(); _bdLen = 0; _tdN = _tnN = _modelTdSheets = 0;
             _bdEstimated = false; _hasBd = _hasTd = _hasTn = false; cboKhung.Items.Clear(); CapNhat();
@@ -245,17 +246,17 @@ namespace GKIN
                         if (string.Equals(tags[i], guess, StringComparison.OrdinalIgnoreCase)) { index = i + 1; break; }
                 if (combo.Items.Count > 0) combo.SelectedIndex = index;
             }
-            Set(tagSTT, "STT", "SOTT");
-            Set(tagMS, "MSBV", "SBV", "MABV", "MASO");
-            Set(tagBVS, "BVS", "SOBV");
-            Set(tagTen, "TENBVE", "TENBV", "TENBANVE", "TENTO");
+            Set(tagSTT, "STT", "SOTT", "TOSO");
+            Set(tagMS, "MSBV", "SBV", "MABV", "MASO", "MATO");
+            Set(tagBVS, "BVS", "SOBV", "TONGTO");
+            Set(tagTen, "TENBVE", "TENBV", "TENBANVE", "TENTO", "TENTOBVE");
             Set(tagTL, "TYLE", "TILE", "TL");
         }
 
         void CapNhat()
         {
             stKt.Text = string.IsNullOrEmpty(_khung) ? "Chưa có" : "✓ 1 khung · " + _khung;
-            stBd.Text = _hasBd ? "✓ 1 tim · " + CadEngine.FmtM(_bdLen) + (_bdEstimated ? " · ước lượng" : "") : "Không thấy";
+            stBd.Text = _hasBd ? "✓ 1 tim · " + CadEngine.FmtM(CadEngine.DrawingUnitsToMeters(_bdLen)) + (_bdEstimated ? " · ước lượng" : "") : "Không thấy";
             stTd.Text = _hasTd ? (_tdN <= 3 ? "✓ trắc dọc VNROAD" : $"✓ {_tdN} dải · đầu bảng ✓") : "Không thấy";
             stTn.Text = _hasTn ? $"✓ {_tnN} mặt cắt" : "Không thấy";
             pillKhung.Text = string.IsNullOrEmpty(_khung) ? "Chưa có khung" : "✓ Khung";
@@ -275,7 +276,8 @@ namespace GKIN
             double kc = Number(txtKC.Text, 350);
             if (kc <= 0) return 1;
             double length = _bdLen > 0 ? _bdLen : _tdExt == null ? 1 : Math.Abs(_tdExt.Value.MaxPoint.X - _tdExt.Value.MinPoint.X);
-            return Math.Max(1, (int)Math.Ceiling(Math.Max(length, 1) / kc));
+            double step = CadEngine.MetersToDrawingUnits(kc);
+            return Math.Max(1, (int)Math.Ceiling(Math.Max(length, 1) / Math.Max(step, 1e-9)));
         }
 
         int SoToTN()
@@ -344,7 +346,7 @@ namespace GKIN
 
             int ntd = SoToTD();
             double tdLength = _bdLen > 0 ? _bdLen : _tdExt == null ? 0 : Math.Abs(_tdExt.Value.MaxPoint.X - _tdExt.Value.MinPoint.X);
-            double tdStep = cboCat.SelectedIndex == 0 ? Number(txtKC.Text, 350) : 0;
+            double tdStep = cboCat.SelectedIndex == 0 ? CadEngine.MetersToDrawingUnits(Number(txtKC.Text, 350)) : 0;
             ObjectId sampleFrame = _kt;
             bool importedSample = false;
             if (!string.IsNullOrWhiteSpace(txtMau.Text))
@@ -407,11 +409,15 @@ namespace GKIN
 
         void DanhSo()
         {
-            var frames = CadEngine.LastFrames;
-            var types = CadEngine.LastTypes;
+            bool useLayouts = cboXuat.SelectedIndex == 2;
+            if (useLayouts) _layoutSheets = CadEngine.ScanLayoutSheets();
+            var frames = useLayouts ? _layoutSheets.Select(x => x.FrameId).ToList() : CadEngine.LastFrames;
+            var types = useLayouts ? _layoutSheets.Select(x => x.Type).ToList() : CadEngine.LastTypes;
             if (frames == null || types == null || frames.Count == 0 || types.Count != frames.Count)
             {
-                Toast("Chỉ đánh số các tờ vừa tạo. Bấm THỰC HIỆN ở tab Bản vẽ trước.");
+                Toast(useLayouts
+                    ? "Không thấy layout GKIN-BD, GKIN-TD hoặc GKIN-TN trong bản vẽ."
+                    : "Chỉ đánh số các tờ Model vừa tạo. Bấm THỰC HIỆN ở tab Bản vẽ trước.");
                 return;
             }
             int nbd = types.Count(x => x == "BD");
@@ -439,7 +445,7 @@ namespace GKIN
                 idxAll++;
             }
             if (updates.Count == 0) { Toast("Không có thẻ attribute nào được chọn để ghi."); return; }
-            int changed = CadEngine.GanAttrs(updates);
+            int changed = AttributeSyncService.Apply(updates);
             Toast($"Đã ghi {changed} attribute trên {updates.Count}/{frames.Count} tờ.");
         }
 

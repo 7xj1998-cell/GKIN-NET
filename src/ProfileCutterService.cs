@@ -38,8 +38,13 @@ namespace GKIN
         {
             var result = new List<Band>();
             double width = Math.Max(1, profile.MaxPoint.X - profile.MinPoint.X);
-            var stations = CollectStations(profile);
-            Extents3d? header = FindHeader(profile);
+            List<(double X, string Text)> stations;
+            Extents3d? header;
+            using (var documentLock = CadEngine.Doc?.LockDocument())
+            {
+                stations = CollectStations(profile);
+                header = FindHeader(profile);
+            }
             double headerMaxX = header == null
                 ? profile.MinPoint.X + Math.Min(width * 0.12, 80)
                 : header.Value.MaxPoint.X;
@@ -60,8 +65,8 @@ namespace GKIN
                     new Point3d(x1, profile.MaxPoint.Y, 0));
                 var band = new Band
                 {
-                    From = StationAt(stations, x0, true) ?? CadEngine.LyTrinh(i * step),
-                    To = StationAt(stations, x1, false) ?? CadEngine.LyTrinh(Math.Min(length, (i + 1) * step))
+                    From = StationAt(stations, x0, true) ?? CadEngine.LyTrinh(CadEngine.DrawingUnitsToMeters(i * step)),
+                    To = StationAt(stations, x1, false) ?? CadEngine.LyTrinh(CadEngine.DrawingUnitsToMeters(Math.Min(length, (i + 1) * step)))
                 };
                 if (header != null)
                     AddWindow(band, header.Value, 1.04);
@@ -72,7 +77,7 @@ namespace GKIN
             var whole = new Band
             {
                 From = CadEngine.LyTrinh(0),
-                To = CadEngine.LyTrinh(length)
+                To = CadEngine.LyTrinh(CadEngine.DrawingUnitsToMeters(length))
             };
             AddWindow(whole, profile, 1.0);
             result.Add(whole);

@@ -74,6 +74,12 @@ namespace GKIN
         public static List<ObjectId> LastFrames { get; private set; } = new List<ObjectId>();
         public static List<string> LastTypes { get; private set; } = new List<string>();
 
+        public static void ClearTransientSheets()
+        {
+            LastFrames = new List<ObjectId>();
+            LastTypes = new List<string>();
+        }
+
         public static bool SameDatabase(Database first, Database second)
         {
             if (first == null || second == null) return false;
@@ -95,7 +101,14 @@ namespace GKIN
         public static string FmtM(double m) =>
             m >= 1000 ? $"{m / 1000.0:0.000} km" : $"{m:0} m";
 
-        static readonly string[] TitleTags = { "STT", "SOTT", "TENBVE", "TENBV", "TENBANVE", "TENTO", "MSBV", "SBV", "MABV", "MASO", "BVS", "SOBV", "TYLE", "TILE", "TL" };
+        static readonly string[] TitleTags =
+        {
+            "STT", "SOTT", "TOSO",
+            "TENBVE", "TENBV", "TENBANVE", "TENTO", "TENTOBVE",
+            "MSBV", "SBV", "MABV", "MASO", "MATO",
+            "BVS", "SOBV", "TONGTO",
+            "TYLE", "TILE", "TL"
+        };
 
         static bool IsTitleTag(string tag)
         {
@@ -932,25 +945,44 @@ namespace GKIN
             if (Db == null || millimeters <= 0) return 0;
             UnitsValue target = Db.Insunits;
             if (target == UnitsValue.Undefined) return millimeters;
-            double millimetersPerUnit;
-            switch (target.ToString())
+            return millimeters / MillimetersPerDrawingUnit(target);
+        }
+
+        public static double MetersToDrawingUnits(double meters)
+        {
+            if (Db == null || meters <= 0) return 0;
+            UnitsValue target = Db.Insunits;
+            if (target == UnitsValue.Undefined) return meters;
+            return meters * 1000.0 / MillimetersPerDrawingUnit(target);
+        }
+
+        public static double DrawingUnitsToMeters(double drawingUnits)
+        {
+            if (Db == null || drawingUnits <= 0) return 0;
+            UnitsValue source = Db.Insunits;
+            if (source == UnitsValue.Undefined) return drawingUnits;
+            return drawingUnits * MillimetersPerDrawingUnit(source) / 1000.0;
+        }
+
+        static double MillimetersPerDrawingUnit(UnitsValue units)
+        {
+            switch (units.ToString())
             {
-                case "Microinches": millimetersPerUnit = 0.0000254; break;
-                case "Mils": millimetersPerUnit = 0.0254; break;
-                case "Inches": millimetersPerUnit = 25.4; break;
-                case "Feet": millimetersPerUnit = 304.8; break;
-                case "Yards": millimetersPerUnit = 914.4; break;
-                case "Miles": millimetersPerUnit = 1609344.0; break;
-                case "Microns": millimetersPerUnit = 0.001; break;
-                case "Centimeters": millimetersPerUnit = 10.0; break;
-                case "Decimeters": millimetersPerUnit = 100.0; break;
-                case "Meters": millimetersPerUnit = 1000.0; break;
-                case "Dekameters": millimetersPerUnit = 10000.0; break;
-                case "Hectometers": millimetersPerUnit = 100000.0; break;
-                case "Kilometers": millimetersPerUnit = 1000000.0; break;
-                default: millimetersPerUnit = 1.0; break;
+                case "Microinches": return 0.0000254;
+                case "Mils": return 0.0254;
+                case "Inches": return 25.4;
+                case "Feet": return 304.8;
+                case "Yards": return 914.4;
+                case "Miles": return 1609344.0;
+                case "Microns": return 0.001;
+                case "Centimeters": return 10.0;
+                case "Decimeters": return 100.0;
+                case "Meters": return 1000.0;
+                case "Dekameters": return 10000.0;
+                case "Hectometers": return 100000.0;
+                case "Kilometers": return 1000000.0;
+                default: return 1.0;
             }
-            return millimeters / millimetersPerUnit;
         }
 
         public static ObjectId ImportTemplateFrame(string file, out string frameName, out string error)
@@ -1156,7 +1188,7 @@ namespace GKIN
                         double left = targetFrame.MinPoint.X + frameWidth * 0.04;
                         double bottom = targetFrame.MinPoint.Y + frameHeight * 0.06;
                         int windowCount = Math.Max(1, plans[index].Windows.Count);
-                        bool horizontal = plans[index].Type == "TN" && !plans[index].StackVertical && windowCount > 1;
+                        bool horizontal = !plans[index].StackVertical && windowCount > 1;
                         double targetWidth = horizontal ? usableWidth / windowCount : usableWidth;
                         double targetHeight = horizontal ? usableHeight : usableHeight / windowCount;
 
@@ -1324,9 +1356,10 @@ namespace GKIN
                 {
                     foreach (var page in pages)
                     {
+                        string layoutName = null;
                         try
                         {
-                            string layoutName = UniqueLayoutName("GKIN-" + page.type);
+                            layoutName = UniqueLayoutName("GKIN-" + page.type);
                             ObjectId layoutId = LayoutManager.Current.CreateLayout(layoutName);
                             LayoutManager.Current.CurrentLayout = layoutName;
                             using (var tr = Db.TransactionManager.StartTransaction())
@@ -1354,13 +1387,24 @@ namespace GKIN
                                 for (int i = 0; i < page.lines.Count; i++)
                                     AddPaperText(paper, tr, page.lines[i], new Point3d(width * 0.11, height * (0.68 - i * 0.032), 0), height * 0.020, width * 0.76);
 
-                                result.Add(new LayoutSheetInfo { LayoutName = layoutName, LayoutId = layoutId, FrameId = frame.ObjectId, Type = page.type, Index = result.Count + 1 });
+                                var sheet = new LayoutSheetInfo { LayoutName = layoutName, LayoutId = layoutId, FrameId = frame.ObjectId, Type = page.type, Index = result.Count + 1 };
                                 tr.Commit();
+                                result.Add(sheet);
                             }
                         }
                         catch (System.Exception ex)
                         {
                             error = ex.Message;
+                            if (!string.IsNullOrWhiteSpace(layoutName))
+                            {
+                                try
+                                {
+                                    if (string.Equals(LayoutManager.Current.CurrentLayout, layoutName, StringComparison.OrdinalIgnoreCase))
+                                        LayoutManager.Current.CurrentLayout = originalLayout;
+                                    LayoutManager.Current.DeleteLayout(layoutName);
+                                }
+                                catch { }
+                            }
                             break;
                         }
                     }
@@ -1477,7 +1521,7 @@ namespace GKIN
                                 double bottom = frameExt.MinPoint.Y + frameHeight * marginB;
                                 int windowCount = Math.Max(1, plan.Windows.Count);
                                 int slots = Math.Max(plan.Slots, windowCount);
-                                bool horizontal = plan.Type == "TN" && !plan.StackVertical && windowCount > 1;
+                                bool horizontal = !plan.StackVertical && windowCount > 1;
                                 double viewportWidth = horizontal ? usableWidth / windowCount * 0.96 : usableWidth * 0.98;
                                 double viewportHeight = horizontal
                                     ? usableHeight * 0.96
@@ -1499,24 +1543,9 @@ namespace GKIN
                                         : new Point3d((source.MinPoint.X + source.MaxPoint.X) / 2.0, (source.MinPoint.Y + source.MaxPoint.Y) / 2.0, 0);
                                     double twist = i < plan.Twist.Count ? plan.Twist[i] : 0;
                                     double span = i < plan.Span.Count ? plan.Span[i] : 0;
-                                    var viewport = new Viewport
-                                    {
-                                        CenterPoint = new Point3d(centerX, centerY, 0),
-                                        Width = Math.Max(1, viewportWidth),
-                                        Height = Math.Max(1, viewportHeight),
-                                        ViewCenter = Point2d.Origin,
-                                        ViewTarget = look,
-                                        ViewDirection = Vector3d.ZAxis,
-                                        TwistAngle = twist
-                                    };
-                                    double sourceWidth = Math.Max(1e-6, source.MaxPoint.X - source.MinPoint.X);
-                                    double sourceHeight = Math.Max(1e-6, source.MaxPoint.Y - source.MinPoint.Y);
-                                    double viewHeight = span > 1
-                                        ? span * viewport.Height / viewport.Width
-                                        : Math.Max(sourceHeight, sourceWidth / (viewport.Width / viewport.Height)) * 1.03;
-                                    viewport.ViewHeight = Math.Max(1e-6, viewHeight);
-                                    paper.AppendEntity(viewport);
-                                    tr.AddNewlyCreatedDBObject(viewport, true);
+                                    var viewport = LayoutViewportService.Create(
+                                        paper, tr, new Point3d(centerX, centerY, 0), viewportWidth, viewportHeight,
+                                        source, look, twist, span);
                                     viewportIds.Add(viewport.ObjectId);
                                 }
 
@@ -1542,6 +1571,16 @@ namespace GKIN
                         catch (System.Exception ex)
                         {
                             error = $"{layoutName ?? plan.Type}: {ex.Message}";
+                            if (!string.IsNullOrWhiteSpace(layoutName))
+                            {
+                                try
+                                {
+                                    if (string.Equals(LayoutManager.Current.CurrentLayout, layoutName, StringComparison.OrdinalIgnoreCase))
+                                        LayoutManager.Current.CurrentLayout = originalLayout;
+                                    LayoutManager.Current.DeleteLayout(layoutName);
+                                }
+                                catch { }
+                            }
                             break;
                         }
                     }
@@ -1611,30 +1650,45 @@ namespace GKIN
             }
             if (td != null)
             {
-                var windows = tdStep > 0 && tdLength > 0
-                    ? SplitByDistance(td.Value, tdLength, tdStep)
-                    : Split(td.Value, Math.Max(1, tdCount), false);
-                for (int i = 0; i < windows.Count; i++)
+                var bands = ProfileCutterService.Cut(td.Value, tdLength, tdStep, Math.Max(1, tdCount));
+                for (int i = 0; i < bands.Count; i++)
                 {
-                    var plan = new SheetPlan { Type = "TD", Index = i + 1, Windows = new List<Extents3d> { windows[i] }, Slots = 1 };
-                    if (mergeBdTd && bd != null && i == 0) plan.Windows.Insert(0, bd.Value);
+                    var band = bands[i];
+                    var plan = new SheetPlan
+                    {
+                        Type = "TD",
+                        Index = i + 1,
+                        StackVertical = false,
+                        Windows = new List<Extents3d>(band.Windows),
+                        Look = new List<Point3d>(band.Look),
+                        Span = new List<double>(band.Span),
+                        Twist = new List<double>(band.Twist),
+                        Slots = Math.Max(1, band.Windows.Count)
+                    };
+                    if (mergeBdTd && bd != null && i == 0)
+                    {
+                        plan.Windows.Insert(0, bd.Value);
+                        plan.Look.Insert(0, new Point3d(
+                            (bd.Value.MinPoint.X + bd.Value.MaxPoint.X) / 2.0,
+                            (bd.Value.MinPoint.Y + bd.Value.MaxPoint.Y) / 2.0, 0));
+                        plan.Span.Insert(0, 0);
+                        plan.Twist.Insert(0, 0);
+                        plan.Slots = plan.Windows.Count;
+                    }
                     plans.Add(plan);
                 }
             }
             if (tnItems != null && tnItems.Count > 0)
             {
-                var ordered = verticalTn
-                    ? tnItems.OrderByDescending(x => x.MaxPoint.Y).ThenBy(x => x.MinPoint.X).ToList()
-                    : tnItems.OrderBy(x => x.MinPoint.X).ThenByDescending(x => x.MaxPoint.Y).ToList();
                 int per = Math.Max(1, tnPerSheet);
-                for (int i = 0; i < ordered.Count; i += per)
+                foreach (var sheet in CrossSectionPackerService.Pack(tnItems, per, verticalTn))
                     plans.Add(new SheetPlan
                     {
                         Type = "TN",
-                        Index = i / per + 1,
-                        StackVertical = verticalTn,
+                        Index = sheet.Index,
+                        StackVertical = sheet.StackVertical,
                         Slots = per,
-                        Windows = ordered.Skip(i).Take(per).ToList()
+                        Windows = sheet.Windows
                     });
             }
             return plans;
