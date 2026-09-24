@@ -5,9 +5,6 @@ using Autodesk.AutoCAD.DatabaseServices;
 
 namespace GKIN
 {
-    /// <summary>
-    /// Ghi đồng bộ attribute khung tên theo alias TOSO / MATO / TONGTO / TENTOBVE / TYLE.
-    /// </summary>
     public static class AttributeSyncService
     {
         static readonly string[][] AliasGroups =
@@ -52,7 +49,7 @@ namespace GKIN
             if (updates == null) return 0;
             foreach (var update in updates)
                 expanded.Add(new KeyValuePair<ObjectId, Dictionary<string, string>>(update.Key, Expand(update.Value)));
-            return CadEngine.WriteAttributes(expanded);
+            return CadEngine.GanAttrs(expanded);
         }
 
         public static string Title(string type, string from, string to, string fallbackName)

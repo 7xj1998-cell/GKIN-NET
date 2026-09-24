@@ -1,16 +1,29 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 
 namespace GKIN
 {
-    /// <summary>
-    /// Cắt dải trắc dọc theo bước lý trình, nhân bản cụm đầu bảng
-    /// và bóc text Km... ở hai mép đoạn cắt.
-    /// </summary>
     public static class ProfileCutterService
     {
+        static readonly Regex StationRx = new Regex(@"(?<![A-Z0-9])KM\s*\d+\s*\+\s*\d{1,3}(?:[\.,]\d+)?(?!\d)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        static bool TryExt(Entity entity, out Extents3d extents)
+        {
+            try { extents = entity.GeometricExtents; return true; }
+            catch { extents = default; return false; }
+        }
+
+        static Extents3d? Union(Extents3d? a, Extents3d b)
+        {
+            if (a == null) return b;
+            var x = a.Value;
+            x.AddExtents(b);
+            return x;
+        }
+
         public sealed class Band
         {
             public List<Extents3d> Windows = new List<Extents3d>();
@@ -104,10 +117,10 @@ namespace GKIN
                         for (int i = 0; i < keys.Length && !hit; i++)
                             if (u.Contains(keys[i])) hit = true;
                         if (!hit) continue;
-                        if (obj is not Entity ent || !CadEngine.TryEntityExtents(ent, out Extents3d ext)) continue;
+                        if (obj is not Entity ent || !TryExt(ent, out Extents3d ext)) continue;
                         double cx = (ext.MinPoint.X + ext.MaxPoint.X) / 2.0;
                         if (cx < left - 5 || cx > right) continue;
-                        acc = CadEngine.UnionExtents(acc, ext);
+                        acc = Union(acc, ext);
                     }
                 }
             }
@@ -142,9 +155,9 @@ namespace GKIN
                         var obj = tr.GetObject(id, OpenMode.ForRead, false);
                         string s = obj switch { DBText t => t.TextString, MText m => m.Contents, _ => null };
                         if (s == null) continue;
-                        var match = CadEngine.StationPattern.Match(s);
+                        var match = StationRx.Match(s);
                         if (!match.Success) continue;
-                        if (obj is not Entity ent || !CadEngine.TryEntityExtents(ent, out Extents3d ext)) continue;
+                        if (obj is not Entity ent || !TryExt(ent, out Extents3d ext)) continue;
                         double cx = (ext.MinPoint.X + ext.MaxPoint.X) / 2.0;
                         double cy = (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0;
                         if (cx < profile.MinPoint.X - 5 || cx > profile.MaxPoint.X + 5) continue;
