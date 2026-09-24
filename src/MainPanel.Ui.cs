@@ -28,9 +28,11 @@ namespace GKIN
         string _khung;
         ObjectId _kt, _bd;
         Extents3d? _bdExt, _tdExt, _tnExt;
+        List<Extents3d> _tnItems = new List<Extents3d>();
         List<LayoutSheetInfo> _layoutSheets = new List<LayoutSheetInfo>();
         double _bdLen;
-        int _tdN, _tnN;
+        int _tdN, _tnN, _modelTdSheets;
+        bool _bdEstimated;
         bool _hasBd, _hasTd, _hasTn;
 
         readonly ComboBox cboKhung = NewCombo();
@@ -38,11 +40,10 @@ namespace GKIN
         readonly Label stBd = NewLbl("—", CLuc);
         readonly Label stTd = NewLbl("—", CLuc);
         readonly Label stTn = NewLbl("—", CLuc);
-        readonly Label stKhac = NewLbl("Không thấy (căn chữ tiêu đề mặt cắt điển hình, kết cấu...)", CPhu);
         readonly TextBox txtTLBD = NewTxt("1/1000"), txtTLTD = NewTxt("1/1000"), txtTLTN = NewTxt("1/200"), txtKC = NewTxt("350");
-        readonly ComboBox cboCat = NewCombo(), cboBang = NewCombo(), cboXep = NewCombo(), cboHuong = NewCombo(), cboXuat = NewCombo();
+        readonly ComboBox cboCat = NewCombo(), cboHuong = NewCombo(), cboXuat = NewCombo();
         readonly CheckBox chkBD = NewChk("Bình đồ", true), chkTD = NewChk("Trắc dọc", true), chkTN = NewChk("Trắc ngang", true);
-        readonly CheckBox chkKhac = NewChk("Bản vẽ khác", true), chkGop = NewChk("Gộp bình đồ + trắc dọc", false), chkAn = NewChk("Ẩn khung rải", true), chkNhieu = NewChk("Nhiều tuyến — đóng khung + đánh số lần lượt từng tuyến", true);
+        readonly CheckBox chkGop = NewChk("Gộp bình đồ + trắc dọc", false), chkAn = NewChk("Không in hình học sao chép", false);
         readonly Panel morePanel = new Panel { BackColor = Color.Transparent, Visible = false };
         readonly TextBox txtMau = NewTxt(""), txtChongMi = NewTxt("0"), txtLayer = NewTxt("GKIN-KHUNG"), txtBaiTo = NewTxt("4");
         readonly CheckBox chkChongMi = NewChk("Chồng mí (mm)", false), chkBaiTo = NewChk("Bãi tờ (tờ/bản vẽ)", false);
@@ -80,7 +81,6 @@ namespace GKIN
             MinimumSize = new Size(500, 420);
             footer.Size = new Size(440, 76);
 
-            var brand = new BrandRail();
             var rail = new Panel { Dock = DockStyle.Right, Width = 38, BackColor = Color.FromArgb(24, 35, 46), Padding = new Padding(2, 5, 2, 5) };
             string[] names = { "Bản vẽ", "Đánh số tờ", "In PDF", "Thông tin" };
             Color[] colors = { CXanh, CTim, CCam, CLuc };
@@ -129,7 +129,6 @@ namespace GKIN
             workspace.Controls.Add(footer);
             Controls.Add(workspace);
             Controls.Add(rail);
-            Controls.Add(brand);
             ShowPage(1);
             CapNhat();
             ResumeLayout(true);

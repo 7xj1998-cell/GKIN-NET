@@ -16,6 +16,6 @@
   <ItemGroup>
     <!-- Build against the oldest SDK in the supported 2021-2024 family. -->
     <PackageReference Include="AutoCAD.NET" Version="24.0.0" />
-    <PackageReference Include="PDFsharp" Version="1.50.5147" />
+    <PackageReference Include="PDFsharp" Version="6.2.0" />
   </ItemGroup>
 </Project>

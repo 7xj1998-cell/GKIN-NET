@@ -24,8 +24,14 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item bin/GKIN.dll dist/GKIN.dll
-          Copy-Item bin/PdfSharp.dll dist/PdfSharp.dll
-          Copy-Item bin/PdfSharp.Charting.dll dist/PdfSharp.Charting.dll
+          $autocadAssemblies = @(
+            "AcCoreMgd.dll", "AcCui.dll", "AcDbMgd.dll", "acdbmgdbrep.dll",
+            "AcDx.dll", "AcMgd.dll", "AcMr.dll", "AcSeamless.dll",
+            "AcTcMgd.dll", "AcWindows.dll", "AdUIMgd.dll", "AdUiPalettes.dll", "AdWindows.dll"
+          )
+          Get-ChildItem bin -Filter *.dll |
+            Where-Object { $_.Name -ne "GKIN.dll" -and $_.Name -notin $autocadAssemblies } |
+            Copy-Item -Destination dist
           Copy-Item GKIN.lsp dist/GKIN.lsp
           Copy-Item README.txt dist/README.txt
           Compress-Archive -Path dist/* -DestinationPath GKIN-APPLOAD.zip -Force

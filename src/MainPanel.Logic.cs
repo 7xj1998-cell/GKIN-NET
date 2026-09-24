@@ -32,43 +32,50 @@ namespace GKIN
             RowScan(card, chkTD, txtTLTD, stTd, 93, 'D');
             RowScan(card, chkTN, txtTLTN, stTn, 117, 'N');
 
-            chkKhac.SetBounds(8, 141, 95, 20); stKhac.SetBounds(104, 142, 314, 18); stKhac.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "Cắt trắc dọc", 8, 168, 94);
-            cboCat.SetBounds(104, 164, 136, 23); txtKC.SetBounds(245, 164, 46, 23); Lbl(card, "m", 295, 168, 16);
-            cboBang.SetBounds(315, 164, 103, 23); cboBang.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "Xếp trắc ngang", 8, 194, 94);
-            cboXep.SetBounds(104, 190, 136, 23); cboHuong.SetBounds(245, 190, 173, 23); cboHuong.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            Lbl(card, "Xuất ra", 8, 220, 94);
-            cboXuat.SetBounds(104, 216, 314, 23); cboXuat.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            chkGop.SetBounds(8, 243, 182, 21); chkAn.SetBounds(205, 243, 150, 21);
-            chkNhieu.SetBounds(8, 265, 410, 21);
+            Lbl(card, "Cắt trắc dọc", 8, 146, 94);
+            cboCat.SetBounds(104, 142, 198, 23); txtKC.SetBounds(307, 142, 70, 23); Lbl(card, "m", 382, 146, 24);
+            cboCat.SelectedIndexChanged += (_, __) => { txtKC.Enabled = cboCat.SelectedIndex == 0; CapNhat(); };
+            Lbl(card, "Xếp trắc ngang", 8, 172, 94);
+            cboHuong.SetBounds(104, 168, 314, 23); cboHuong.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            Lbl(card, "Xuất ra", 8, 198, 94);
+            cboXuat.SetBounds(104, 194, 314, 23); cboXuat.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            chkGop.SetBounds(8, 221, 182, 21); chkAn.SetBounds(205, 221, 190, 21);
 
             var more = Mini("▸  Tùy chọn thêm — file khung mẫu · chồng mí · layer · bãi tờ");
-            more.TextAlign = ContentAlignment.MiddleLeft; more.SetBounds(8, 287, 410, 22); more.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            more.TextAlign = ContentAlignment.MiddleLeft; more.SetBounds(8, 245, 410, 22); more.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
             more.Click += (_, __) => { morePanel.Visible = !morePanel.Visible; more.Text = (morePanel.Visible ? "▾" : "▸") + "  Tùy chọn thêm — file khung mẫu · chồng mí · layer · bãi tờ"; };
 
-            morePanel.SetBounds(8, 311, 410, 89); morePanel.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            morePanel.SetBounds(8, 269, 410, 89); morePanel.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
             Lbl(morePanel, "File khung mẫu", 8, 4, 95); txtMau.SetBounds(104, 1, 252, 22); txtMau.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
             var mau = Mini("..."); mau.SetBounds(360, 1, 42, 22); mau.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             mau.Click += (_, __) => { using var d = new OpenFileDialog { Filter = "Bản vẽ AutoCAD (*.dwg)|*.dwg|Tất cả tệp|*.*" }; if (d.ShowDialog() == DialogResult.OK) txtMau.Text = d.FileName; };
             chkChongMi.SetBounds(8, 26, 120, 20); txtChongMi.SetBounds(132, 25, 48, 22);
             Lbl(morePanel, "Layer khung rải", 193, 29, 102); txtLayer.SetBounds(294, 25, 108, 22); txtLayer.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             chkBaiTo.SetBounds(8, 52, 146, 20); txtBaiTo.SetBounds(157, 51, 48, 22);
+            void ToggleOptions()
+            {
+                txtChongMi.Enabled = chkChongMi.Checked;
+                txtBaiTo.Enabled = chkBaiTo.Checked && cboXuat.SelectedIndex == 1;
+            }
+            chkChongMi.CheckedChanged += (_, __) => ToggleOptions();
+            chkBaiTo.CheckedChanged += (_, __) => ToggleOptions();
+            cboXuat.SelectedIndexChanged += (_, __) => ToggleOptions();
             morePanel.Controls.AddRange(new Control[] { txtMau, mau, chkChongMi, txtChongMi, txtLayer, chkBaiTo, txtBaiTo });
 
             card.Controls.AddRange(new Control[] { cboKhung, tayK, stKt, chkBD, txtTLBD, stBd, chkTD, txtTLTD, stTd, chkTN, txtTLTN, stTn,
-                chkKhac, stKhac, cboCat, txtKC, cboBang, cboXep, cboHuong, cboXuat, chkGop, chkAn, chkNhieu, more, morePanel });
+                cboCat, txtKC, cboHuong, cboXuat, chkGop, chkAn, more, morePanel });
             card.Resize += (_, __) =>
             {
                 int w = card.ClientSize.Width;
                 cboKhung.Width = Math.Max(80, w - 176); tayK.Left = w - 70; stKt.Width = w - 112;
                 stBd.Width = stTd.Width = stTn.Width = Math.Max(50, w - 254);
                 foreach (var button in card.Controls.OfType<Button>().Where(x => x.Text == "Tay ▾")) button.Left = w - 66;
-                stKhac.Width = w - 112; cboBang.Left = w - 111; cboBang.Width = 103;
-                cboHuong.Width = w - 253; cboXuat.Width = w - 112;
+                cboCat.Width = Math.Max(100, w - 224); txtKC.Left = w - 111;
+                cboHuong.Width = cboXuat.Width = w - 112;
                 more.Width = w - 16; morePanel.Width = w - 16;
                 txtMau.Width = Math.Max(60, w - 176); mau.Left = w - 66; txtLayer.Width = Math.Max(60, w - 310);
             };
+            ToggleOptions();
         }
 
         void Build2()
@@ -154,8 +161,6 @@ namespace GKIN
         void FillCombos()
         {
             Fill(cboCat, "Khoảng cách đều", "Theo bề rộng", "Điểm cắt");
-            Fill(cboBang, "Bằng", "Không bằng");
-            Fill(cboXep, "Theo lưới gốc", "Theo lý trình", "Tự chọn");
             Fill(cboHuong, "Ngang 1-2-3-4", "Dọc 1-2-3-4");
             Fill(cboXuat, "MODEL — trắc dọc + trắc ngang", "MODEL — xếp hàng", "LAYOUT — mỗi tờ một layout");
             Fill(kieuSTT, "nối tiếp cả bộ → 11", "từng loại → 01", "không ghi");
@@ -173,20 +178,27 @@ namespace GKIN
                 var db = CadEngine.Db;
                 if (db == null) { ResetState(null); Toast("Không có bản vẽ đang mở."); return; }
                 if (!CadEngine.SameDatabase(_stateDb, db)) ResetState(db);
+                _khung = null; _kt = ObjectId.Null; _bd = ObjectId.Null;
+                _bdExt = _tdExt = _tnExt = null; _bdLen = 0; _bdEstimated = false;
                 _frames = CadEngine.QuetKhung();
                 cboKhung.Items.Clear();
                 foreach (var f in _frames) cboKhung.Items.Add(f);
-                int best = 0;
-                for (int i = 0; i < _frames.Count; i++) if (_frames[i].Name.ToUpperInvariant().Contains("KHUNG")) best = i;
                 if (_frames.Count > 0)
                 {
-                    cboKhung.SelectedIndex = best;
-                    _khung = _frames[best].Name; _kt = _frames[best].Sample; NapTags(_kt);
+                    cboKhung.SelectedIndex = 0;
+                    _khung = _frames[0].Name; _kt = _frames[0].Sample; NapTags(_kt);
                 }
-                _hasBd = CadEngine.QuetBinhDo(out _bd, out _bdLen);
+                _hasBd = CadEngine.QuetBinhDo(out _bd, out _bdLen, out _bdEstimated);
                 _bdExt = _hasBd ? CadEngine.BBox(_bd) : null;
                 _tdN = CadEngine.QuetTracDocKm(out _tdExt); _hasTd = _tdN > 0;
-                _tnN = CadEngine.QuetTracNgang(out _tnExt); _hasTn = _tnN > 0;
+                _tnN = CadEngine.QuetTracNgang(out _tnExt, out _tnItems); _hasTn = _tnN > 0;
+                _layoutSheets = CadEngine.ScanLayoutSheets();
+                if (_kt.IsNull && _layoutSheets.Count > 0)
+                {
+                    _kt = _layoutSheets[0].FrameId;
+                    _khung = CadEngine.BlockName(_kt);
+                    NapTags(_kt);
+                }
                 CapNhat(); Toast("Đã dò lại bản vẽ.");
             }
             catch (Exception ex) { Toast("Lỗi dò: " + ex.Message); }
@@ -202,8 +214,8 @@ namespace GKIN
         void ResetState(Database db)
         {
             _stateDb = db; _frames.Clear(); _khung = null; _kt = ObjectId.Null; _bd = ObjectId.Null;
-            _bdExt = _tdExt = _tnExt = null; _layoutSheets.Clear(); _bdLen = 0; _tdN = _tnN = 0;
-            _hasBd = _hasTd = _hasTn = false; cboKhung.Items.Clear(); CapNhat();
+            _bdExt = _tdExt = _tnExt = null; _tnItems.Clear(); _layoutSheets.Clear(); _bdLen = 0; _tdN = _tnN = _modelTdSheets = 0;
+            _bdEstimated = false; _hasBd = _hasTd = _hasTn = false; cboKhung.Items.Clear(); CapNhat();
         }
 
         bool EnsureCurrentDocument()
@@ -231,12 +243,13 @@ namespace GKIN
         void CapNhat()
         {
             stKt.Text = string.IsNullOrEmpty(_khung) ? "Chưa có" : "✓ 1 khung · " + _khung;
-            stBd.Text = _hasBd ? "✓ 1 tim · " + CadEngine.FmtM(_bdLen) : "Không thấy";
+            stBd.Text = _hasBd ? "✓ 1 tim · " + CadEngine.FmtM(_bdLen) + (_bdEstimated ? " · ước lượng" : "") : "Không thấy";
             stTd.Text = _hasTd ? $"✓ {_tdN} dải · đầu bảng ✓" : "Không thấy";
             stTn.Text = _hasTn ? $"✓ {_tnN} lưới mặt cắt" : "Không thấy";
-            pillKhung.Text = string.IsNullOrEmpty(_khung) ? "× Khung" : "✓ Khung";
+            pillKhung.Text = string.IsNullOrEmpty(_khung) ? "Chưa có khung" : "✓ Khung";
             pillBd.Text = _hasBd ? "BĐ 1 tim" : "BĐ 0";
-            pillTd.Text = _hasTd ? $"TĐ {SoToTD()} dải" : "TĐ 0";
+            int tdSheets = _layoutSheets.Count > 0 ? _layoutSheets.Count(x => x.Type == "TD") : _modelTdSheets;
+            pillTd.Text = $"TĐ {tdSheets} tờ";
             pillTn.Text = _hasTn ? $"TN {_tnN} lưới" : "TN 0";
             pillDau.Text = _hasTd ? $"Đầu bảng {_tdN}/{_tdN}" : "Đầu bảng 0/0";
             pillKem.Text = "Kèm 0";
@@ -244,16 +257,19 @@ namespace GKIN
 
         int SoToTD()
         {
-            if (!_hasBd && !_hasTd) return 0;
+            if (!_hasTd) return 0;
+            if (cboCat.SelectedIndex == 1) return 1;
+            if (cboCat.SelectedIndex == 2) return 0;
             double kc = Number(txtKC.Text, 350);
-            return Math.Max(1, (int)Math.Ceiling(Math.Max(_bdLen, 1) / kc));
+            if (kc <= 0) return 1;
+            double length = _bdLen > 0 ? _bdLen : _tdExt == null ? 1 : Math.Abs(_tdExt.Value.MaxPoint.X - _tdExt.Value.MinPoint.X);
+            return Math.Max(1, (int)Math.Ceiling(Math.Max(length, 1) / kc));
         }
 
         int SoToTN()
         {
             if (!_hasTn) return 0;
-            int moi = cboHuong.SelectedIndex == 0 ? 4 : 6;
-            return (int)Math.Ceiling(_tnN / (double)moi);
+            return (int)Math.Ceiling(_tnItems.Count / 4.0);
         }
 
         void Tay(char loai)
@@ -268,9 +284,9 @@ namespace GKIN
                 {
                     var e = tr.GetObject(r.ObjectId, OpenMode.ForRead);
                     if (loai == 'K' && e is BlockReference br) { _khung = CadEngine.EffectiveName(br); _kt = r.ObjectId; NapTags(_kt); }
-                    else if (loai == 'B' && e is Curve c) { _bd = r.ObjectId; try { _bdExt = c.GeometricExtents; _bdLen = c.GetDistanceAtParameter(c.EndParam); } catch { } _hasBd = true; }
+                    else if (loai == 'B' && e is Curve c) { _bd = r.ObjectId; try { _bdExt = c.GeometricExtents; _bdLen = c.GetDistanceAtParameter(c.EndParam); } catch { } _bdEstimated = false; _hasBd = true; }
                     else if (loai == 'D' && e is Entity td) { _hasTd = true; _tdN = Math.Max(1, _tdN); try { _tdExt = CadEngine.Expand(td.GeometricExtents, 0.08, 2.50); } catch { } }
-                    else if (e is Entity tn) { _hasTn = true; _tnN = Math.Max(1, _tnN); try { _tnExt = CadEngine.Expand(tn.GeometricExtents, 0.12, 0.20); } catch { } }
+                    else if (e is Entity tn) { _hasTn = true; _tnN = 1; try { var ext = tn.GeometricExtents; _tnItems = new List<Extents3d> { ext }; _tnExt = CadEngine.Expand(ext, 0.12, 0.20); } catch { } }
                     tr.Commit();
                 }
                 CapNhat();
@@ -285,32 +301,76 @@ namespace GKIN
 
         void DongKhung()
         {
-            if (string.IsNullOrEmpty(_khung)) { Toast("Chưa có khung tên."); return; }
-            int ntd = SoToTD(), ntn = SoToTN();
-            if (cboXuat.SelectedIndex == 2)
+            if (string.IsNullOrEmpty(_khung) && string.IsNullOrWhiteSpace(txtMau.Text)) { Toast("Chưa có khung tên."); return; }
+            if (chkTD.Checked && _hasTd && cboCat.SelectedIndex == 2)
             {
-                _layoutSheets = CadEngine.CreateLayouts(_kt, chkBD.Checked ? _bdExt : null, chkTD.Checked ? _tdExt : null,
-                    chkTN.Checked ? _tnExt : null, ntd, ntn, chkGop.Checked, cboHuong.SelectedIndex == 1, out string error);
-                CapNhat();
-                Toast(string.IsNullOrEmpty(error) ? $"Đã tạo {_layoutSheets.Count} layout." : $"Đã tạo {_layoutSheets.Count} layout; dừng tại lỗi: {error}");
+                Toast("Chưa có điểm cắt trắc dọc; hãy chọn Khoảng cách đều hoặc Theo bề rộng.");
                 return;
             }
 
-            var made = CadEngine.CreateModelSheets(_kt, chkBD.Checked ? _bdExt : null, chkTD.Checked ? _tdExt : null,
-                chkTN.Checked ? _tnExt : null, ntd, ntn, chkGop.Checked, cboHuong.SelectedIndex == 1,
-                cboXuat.SelectedIndex == 1, txtLayer.Text, Number(txtChongMi.Text, 0), Math.Max(1, (int)Number(txtBaiTo.Text, 4)), out string modelError);
-            CapNhat();
-            Toast(string.IsNullOrEmpty(modelError) ? $"Đã tạo {made.Count} khung trong Model." : $"Đã tạo {made.Count} khung; dừng tại lỗi: {modelError}");
+            int ntd = SoToTD();
+            double tdLength = _bdLen > 0 ? _bdLen : _tdExt == null ? 0 : Math.Abs(_tdExt.Value.MaxPoint.X - _tdExt.Value.MinPoint.X);
+            double tdStep = cboCat.SelectedIndex == 0 ? Number(txtKC.Text, 350) : 0;
+            ObjectId sampleFrame = _kt;
+            bool importedSample = false;
+            if (!string.IsNullOrWhiteSpace(txtMau.Text))
+            {
+                sampleFrame = CadEngine.ImportTemplateFrame(txtMau.Text, out _, out string importError);
+                if (sampleFrame.IsNull) { Toast("Không nạp được file khung mẫu: " + importError); return; }
+                importedSample = true;
+            }
+
+            try
+            {
+                if (cboXuat.SelectedIndex == 2)
+                {
+                    _layoutSheets = CadEngine.CreateLayouts(sampleFrame, chkBD.Checked ? _bdExt : null, chkTD.Checked ? _tdExt : null,
+                        chkTN.Checked ? _tnItems : null, ntd, tdLength, tdStep, chkGop.Checked, cboHuong.SelectedIndex == 1, out string error);
+                    _modelTdSheets = 0;
+                    if (importedSample && _layoutSheets.Count > 0)
+                    {
+                        _kt = _layoutSheets[0].FrameId;
+                        _khung = CadEngine.BlockName(_kt);
+                    }
+                    CapNhat();
+                    Toast(string.IsNullOrEmpty(error) ? $"Đã tạo {_layoutSheets.Count} layout." : $"Đã tạo {_layoutSheets.Count} layout; dừng tại lỗi: {error}");
+                    return;
+                }
+
+                double overlap = chkChongMi.Checked
+                    ? CadEngine.MillimetersToDrawingUnits(Number(txtChongMi.Text, 0))
+                    : 0;
+                int sheetsPerRow = chkBaiTo.Checked && cboXuat.SelectedIndex == 1
+                    ? Math.Max(1, (int)Number(txtBaiTo.Text, 4))
+                    : 4;
+                var made = CadEngine.CreateModelSheets(sampleFrame, chkBD.Checked ? _bdExt : null, chkTD.Checked ? _tdExt : null,
+                    chkTN.Checked ? _tnItems : null, ntd, tdLength, tdStep, chkGop.Checked, cboHuong.SelectedIndex == 1,
+                    cboXuat.SelectedIndex == 1, txtLayer.Text, overlap, sheetsPerRow, chkAn.Checked,
+                    out _modelTdSheets, out string modelError);
+                _layoutSheets.Clear();
+                if (importedSample && made.Count > 0)
+                {
+                    _kt = made[0];
+                    _khung = CadEngine.BlockName(_kt);
+                }
+                CapNhat();
+                Toast(string.IsNullOrEmpty(modelError) ? $"Đã tạo {made.Count} khung trong Model." : $"Đã tạo {made.Count} khung; dừng tại lỗi: {modelError}");
+            }
+            finally
+            {
+                if (importedSample) CadEngine.DeleteEntity(sampleFrame);
+            }
         }
 
         void DanhSo()
         {
             bool useLayouts = cboXuat.SelectedIndex == 2;
-            if (useLayouts && _layoutSheets.Count == 0) { Toast("Chưa có layout GKIN trong phiên này; hãy THỰC HIỆN ở tab Bản vẽ trước."); return; }
+            if (useLayouts) _layoutSheets = CadEngine.ScanLayoutSheets();
+            if (useLayouts && _layoutSheets.Count == 0) { Toast("Không thấy layout GKIN-BD, GKIN-TD hoặc GKIN-TN trong bản vẽ."); return; }
             var frames = useLayouts ? _layoutSheets.ConvertAll(x => x.FrameId) : CadEngine.KhungRai(_khung);
             if (frames.Count == 0) { Toast("Không thấy khung rải."); return; }
             int nbd = useLayouts ? _layoutSheets.Count(x => x.Type == "BD") : (_hasBd && !chkGop.Checked ? 1 : 0);
-            int ntd = useLayouts ? _layoutSheets.Count(x => x.Type == "TD") : SoToTD();
+            int ntd = useLayouts ? _layoutSheets.Count(x => x.Type == "TD") : (_modelTdSheets > 0 ? _modelTdSheets : SoToTD());
             int ntn = useLayouts ? _layoutSheets.Count(x => x.Type == "TN") : SoToTN();
             if (frames.Count != nbd + ntd + ntn) ntn = Math.Max(0, frames.Count - nbd - ntd);
             int sobd = Math.Max(1, (int)Number(txtSoBD.Text, 1)), cs = Math.Max(1, (int)Number(txtSoCS.Text, 2));
@@ -355,7 +415,8 @@ namespace GKIN
         void InPdf(bool reprint)
         {
             bool useLayouts = cboXuat.SelectedIndex == 2;
-            if (useLayouts && _layoutSheets.Count == 0) { Toast("Chưa có layout GKIN trong phiên này; hãy THỰC HIỆN ở tab Bản vẽ trước."); return; }
+            if (useLayouts) _layoutSheets = CadEngine.ScanLayoutSheets();
+            if (useLayouts && _layoutSheets.Count == 0) { Toast("Không thấy layout GKIN-BD, GKIN-TD hoặc GKIN-TN trong bản vẽ."); return; }
             var frames = useLayouts ? _layoutSheets.ConvertAll(x => x.FrameId) : CadEngine.KhungRai(_khung);
             if (frames.Count == 0) { Toast("Không thấy tờ để in."); return; }
             if (string.IsNullOrWhiteSpace(txtPDF.Text)) { Toast("Chưa chọn đường dẫn PDF."); return; }
@@ -411,7 +472,7 @@ namespace GKIN
             {
                 CadEngine.DeleteLayouts(front.Select(x => x.LayoutName));
             }
-            int pageCount = requests.Count + frontRequests.Count;
+            int pageCount = batches.Sum(x => x.sheets.Count);
             Toast(lastError == null ? $"Đã tạo {files} PDF, gồm {pageCount} trang." : $"Đã tạo {files}/{batches.Count} PDF; lỗi cuối: {lastError}");
         }
 

@@ -75,20 +75,6 @@ namespace GKIN
             if (_ps != null) _ps.Visible = false;
         }
 
-        public static void RescanFromCommand()
-        {
-            if (_panel != null)
-                _panel.DoLai();
-            else
-            {
-                CadEngine.QuetKhung();
-                CadEngine.QuetBinhDo(out _, out _);
-                CadEngine.QuetTracDocKm(out _);
-                CadEngine.QuetTracNgang(out _);
-            }
-            AcadApp.DocumentManager.MdiActiveDocument?.Editor.WriteMessage("\n[GKIN] Đã dò xong.");
-        }
-
         public static void AllowPick(Action pick)
         {
             if (_ps != null) _ps.KeepFocus = false;

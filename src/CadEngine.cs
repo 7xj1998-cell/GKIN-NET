@@ -2,13 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.PlottingServices;
 using Autodesk.AutoCAD.Runtime;
-using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
@@ -20,6 +20,7 @@ namespace GKIN
         public int Count;
         public ObjectId Sample;
         public int W, H;
+        internal int Priority;
         public override string ToString() => $"{Name} · {Count} khung · {W}x{H}";
     }
 
@@ -46,8 +47,12 @@ namespace GKIN
         {
             public string Type;
             public int Index;
+            public bool StackVertical = true;
             public List<Extents3d> Windows = new List<Extents3d>();
         }
+
+        static readonly Regex StationRegex = new Regex(@"(?<![A-Z0-9])KM\s*\d+\s*\+\s*\d{1,3}(?:[\.,]\d+)?(?!\d)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        static readonly Regex SheetLayoutRegex = new Regex(@"^GKIN-(BD|TD|TN)-(\d+)(?:-\d+)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         public static Document Doc => AcadApp.DocumentManager.MdiActiveDocument;
         public static Editor Ed => Doc?.Editor;
@@ -88,9 +93,11 @@ namespace GKIN
                 {
                     if (tr.GetObject(id, OpenMode.ForRead) is not BlockReference br) continue;
                     string nm = EffectiveName(br);
+                    int priority = FramePriority(br, tr);
+                    if (priority <= 0) continue;
                     if (!map.TryGetValue(nm, out var rec))
                     {
-                        rec = new FrameInfo { Name = nm, Count = 0, Sample = id };
+                        rec = new FrameInfo { Name = nm, Count = 0, Sample = id, Priority = priority };
                         try
                         {
                             var ext = br.GeometricExtents;
@@ -100,11 +107,32 @@ namespace GKIN
                         catch { }
                         map[nm] = rec;
                     }
+                    else if (priority > rec.Priority)
+                    {
+                        rec.Priority = priority;
+                        rec.Sample = id;
+                    }
                     rec.Count++;
                 }
                 tr.Commit();
             }
-            return map.Values.OrderByDescending(x => x.Count).ToList();
+            return map.Values.OrderByDescending(x => x.Priority).ThenByDescending(x => x.Count).ThenBy(x => x.Name).ToList();
+        }
+
+        static int FramePriority(BlockReference br, Transaction tr)
+        {
+            string name = EffectiveName(br) ?? "";
+            if (name.StartsWith("*U", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("*D", StringComparison.OrdinalIgnoreCase)) return -1;
+            foreach (ObjectId id in br.AttributeCollection)
+            {
+                if (tr.GetObject(id, OpenMode.ForRead, false) is not AttributeReference attribute) continue;
+                string tag = attribute.Tag ?? "";
+                if (tag.Equals("STT", StringComparison.OrdinalIgnoreCase)
+                    || tag.Equals("TENBVE", StringComparison.OrdinalIgnoreCase)
+                    || tag.Equals("MSBV", StringComparison.OrdinalIgnoreCase)) return 2;
+            }
+            return name.IndexOf("KHUNG", StringComparison.OrdinalIgnoreCase) >= 0 ? 1 : 0;
         }
 
         public static string EffectiveName(BlockReference br)
@@ -118,10 +146,12 @@ namespace GKIN
             return br.Name;
         }
 
-        public static bool QuetBinhDo(out ObjectId id, out double len)
+        public static bool QuetBinhDo(out ObjectId id, out double len, out bool estimated)
         {
-            id = ObjectId.Null; len = 0;
+            id = ObjectId.Null; len = 0; estimated = false;
             if (Db == null) return false;
+            ObjectId fallbackId = ObjectId.Null;
+            double fallbackLength = 0;
             using (Doc.LockDocument())
             using (var tr = Db.TransactionManager.StartTransaction())
             {
@@ -135,11 +165,20 @@ namespace GKIN
                     try
                     {
                         double d = c.GetDistanceAtParameter(c.EndParam);
-                        if (d > len) { len = d; id = eid; }
+                        if (d > fallbackLength) { fallbackLength = d; fallbackId = eid; }
+                        string layer = (ent.Layer ?? "").ToUpperInvariant();
+                        bool preferred = layer.Contains("TIM") || layer.Contains("TUYEN") || layer.Contains("CENTER");
+                        if (preferred && d > len) { len = d; id = eid; }
                     }
                     catch { }
                 }
                 tr.Commit();
+            }
+            if (id.IsNull && !fallbackId.IsNull)
+            {
+                id = fallbackId;
+                len = fallbackLength;
+                estimated = true;
             }
             return !id.IsNull;
         }
@@ -165,7 +204,7 @@ namespace GKIN
                         MText m => m.Contents,
                         _ => null
                     };
-                    if (s != null && s.ToUpperInvariant().Contains("KM"))
+                    if (s != null && StationRegex.IsMatch(s))
                     {
                         n++;
                         if (ent is Entity marker && TryExtents(marker, out Extents3d markerExt))
@@ -178,10 +217,11 @@ namespace GKIN
             return n;
         }
 
-        public static int QuetTracNgang(out Extents3d? source)
+        public static int QuetTracNgang(out Extents3d? source, out List<Extents3d> items)
         {
             int n = 0;
             source = null;
+            items = new List<Extents3d>();
             if (Db == null) return 0;
             using (Doc.LockDocument())
             using (var tr = Db.TransactionManager.StartTransaction())
@@ -198,13 +238,68 @@ namespace GKIN
                     if (nm.Contains("TN") || nm.Contains("TNCT") || nm.Contains("MATCAT") || nm.Contains("TRACNGANG"))
                     {
                         n++;
-                        if (TryExtents(br, out Extents3d markerExt)) source = Union(source, markerExt);
+                        if (TryExtents(br, out Extents3d markerExt))
+                        {
+                            source = Union(source, markerExt);
+                            items.Add(markerExt);
+                        }
                     }
                 }
-                source = GrowToNearbyGeometry(source, all, 0.12, 0.20);
+                var grownItems = new List<Extents3d>();
+                foreach (Extents3d marker in items)
+                    grownItems.Add(GrowToNearbyGeometry(marker, all, 0.12, 0.20) ?? marker);
+                items = grownItems;
+                source = null;
+                foreach (Extents3d item in items) source = Union(source, item);
                 tr.Commit();
             }
             return n;
+        }
+
+        public static List<LayoutSheetInfo> ScanLayoutSheets()
+        {
+            var result = new List<LayoutSheetInfo>();
+            if (Db == null) return result;
+            using (Doc.LockDocument())
+            using (var tr = Db.TransactionManager.StartTransaction())
+            {
+                var dictionary = (DBDictionary)tr.GetObject(Db.LayoutDictionaryId, OpenMode.ForRead);
+                foreach (DBDictionaryEntry entry in dictionary)
+                {
+                    Match match = SheetLayoutRegex.Match(entry.Key);
+                    if (!match.Success) continue;
+                    var layout = (Layout)tr.GetObject(entry.Value, OpenMode.ForRead);
+                    var paper = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForRead);
+                    ObjectId frameId = ObjectId.Null;
+                    int bestPriority = 0;
+                    double bestArea = 0;
+                    foreach (ObjectId entityId in paper)
+                    {
+                        if (tr.GetObject(entityId, OpenMode.ForRead, false) is not BlockReference frame) continue;
+                        int priority = FramePriority(frame, tr);
+                        if (priority <= 0) continue;
+                        double area = 0;
+                        if (TryExtents(frame, out Extents3d ext))
+                            area = Math.Abs((ext.MaxPoint.X - ext.MinPoint.X) * (ext.MaxPoint.Y - ext.MinPoint.Y));
+                        if (priority < bestPriority || (priority == bestPriority && area <= bestArea)) continue;
+                        bestPriority = priority;
+                        bestArea = area;
+                        frameId = entityId;
+                    }
+                    if (frameId.IsNull) continue;
+                    result.Add(new LayoutSheetInfo
+                    {
+                        LayoutName = layout.LayoutName,
+                        Type = match.Groups[1].Value.ToUpperInvariant(),
+                        Index = int.Parse(match.Groups[2].Value),
+                        LayoutId = entry.Value,
+                        FrameId = frameId
+                    });
+                }
+                tr.Commit();
+            }
+            int TypeOrder(string type) => type == "BD" ? 0 : type == "TD" ? 1 : 2;
+            return result.OrderBy(x => TypeOrder(x.Type)).ThenBy(x => x.Index).ThenBy(x => x.LayoutName).ToList();
         }
 
         static bool TryExtents(Entity entity, out Extents3d extents)
@@ -318,6 +413,20 @@ namespace GKIN
             return tags;
         }
 
+        public static string BlockName(ObjectId id)
+        {
+            if (Db == null || !IsCurrentDatabase(id)) return null;
+            using (Doc.LockDocument())
+            using (var tr = Db.TransactionManager.StartTransaction())
+            {
+                string name = tr.GetObject(id, OpenMode.ForRead, false) is BlockReference block
+                    ? EffectiveName(block)
+                    : null;
+                tr.Commit();
+                return name;
+            }
+        }
+
         public static int GanAttrs(IEnumerable<KeyValuePair<ObjectId, Dictionary<string, string>>> updates)
         {
             if (Db == null || updates == null) return 0;
@@ -365,12 +474,136 @@ namespace GKIN
             return null;
         }
 
+        public static double MillimetersToDrawingUnits(double millimeters)
+        {
+            if (Db == null || millimeters <= 0) return 0;
+            UnitsValue target = Db.Insunits;
+            if (target == UnitsValue.Undefined) return millimeters;
+            double millimetersPerUnit;
+            switch (target.ToString())
+            {
+                case "Microinches": millimetersPerUnit = 0.0000254; break;
+                case "Mils": millimetersPerUnit = 0.0254; break;
+                case "Inches": millimetersPerUnit = 25.4; break;
+                case "Feet": millimetersPerUnit = 304.8; break;
+                case "Yards": millimetersPerUnit = 914.4; break;
+                case "Miles": millimetersPerUnit = 1609344.0; break;
+                case "Microns": millimetersPerUnit = 0.001; break;
+                case "Centimeters": millimetersPerUnit = 10.0; break;
+                case "Decimeters": millimetersPerUnit = 100.0; break;
+                case "Meters": millimetersPerUnit = 1000.0; break;
+                case "Dekameters": millimetersPerUnit = 10000.0; break;
+                case "Hectometers": millimetersPerUnit = 100000.0; break;
+                case "Kilometers": millimetersPerUnit = 1000000.0; break;
+                default: millimetersPerUnit = 1.0; break;
+            }
+            return millimeters / millimetersPerUnit;
+        }
+
+        public static ObjectId ImportTemplateFrame(string file, out string frameName, out string error)
+        {
+            frameName = null;
+            error = null;
+            if (Db == null || string.IsNullOrWhiteSpace(file) || !File.Exists(file))
+            {
+                error = "File khung mẫu không tồn tại.";
+                return ObjectId.Null;
+            }
+
+            try
+            {
+                using var source = new Database(false, true);
+                source.ReadDwgFile(file, FileOpenMode.OpenForReadAndAllShare, false, null);
+                ObjectId sourceDefinition = ObjectId.Null;
+                Scale3d scale = new Scale3d(1);
+                double rotation = 0;
+                var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                int bestPriority = 0;
+                double bestArea = 0;
+                using (var sourceTransaction = source.TransactionManager.StartTransaction())
+                {
+                    var table = (BlockTable)sourceTransaction.GetObject(source.BlockTableId, OpenMode.ForRead);
+                    var model = (BlockTableRecord)sourceTransaction.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                    foreach (ObjectId id in model)
+                    {
+                        if (sourceTransaction.GetObject(id, OpenMode.ForRead, false) is not BlockReference candidate) continue;
+                        int priority = FramePriority(candidate, sourceTransaction);
+                        if (priority <= 0) continue;
+                        double area = 0;
+                        if (TryExtents(candidate, out Extents3d ext))
+                            area = Math.Abs((ext.MaxPoint.X - ext.MinPoint.X) * (ext.MaxPoint.Y - ext.MinPoint.Y));
+                        if (priority < bestPriority || (priority == bestPriority && area <= bestArea)) continue;
+                        bestPriority = priority;
+                        bestArea = area;
+                        frameName = EffectiveName(candidate);
+                        sourceDefinition = candidate.IsDynamicBlock ? candidate.DynamicBlockTableRecord : candidate.BlockTableRecord;
+                        scale = candidate.ScaleFactors;
+                        rotation = candidate.Rotation;
+                        values.Clear();
+                        foreach (ObjectId attributeId in candidate.AttributeCollection)
+                            if (sourceTransaction.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute)
+                                values[attribute.Tag] = attribute.TextString;
+                    }
+                    sourceTransaction.Commit();
+                }
+                if (sourceDefinition.IsNull)
+                {
+                    error = "Không thấy block khung có STT, TENBVE, MSBV hoặc tên chứa KHUNG trong file mẫu.";
+                    return ObjectId.Null;
+                }
+
+                var ids = new ObjectIdCollection { sourceDefinition };
+                var mapping = new IdMapping();
+                using (Doc.LockDocument())
+                {
+                    source.WblockCloneObjects(ids, Db.BlockTableId, mapping, DuplicateRecordCloning.MangleName, false);
+                    ObjectId definitionId = mapping[sourceDefinition].Value;
+                    using (var tr = Db.TransactionManager.StartTransaction())
+                    {
+                        var table = (BlockTable)tr.GetObject(Db.BlockTableId, OpenMode.ForRead);
+                        var model = (BlockTableRecord)tr.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                        ObjectId layerId = EnsureLayer("GKIN-TEMPLATE", tr, false);
+                        var frame = new BlockReference(Point3d.Origin, definitionId)
+                        {
+                            ScaleFactors = scale,
+                            Rotation = rotation,
+                            LayerId = layerId,
+                            Visible = false
+                        };
+                        model.AppendEntity(frame);
+                        tr.AddNewlyCreatedDBObject(frame, true);
+                        AddAttributes(frame, definitionId, values, tr);
+                        tr.Commit();
+                        return frame.ObjectId;
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                error = ex.Message;
+                return ObjectId.Null;
+            }
+        }
+
+        public static void DeleteEntity(ObjectId id)
+        {
+            if (!IsCurrentDatabase(id)) return;
+            using (Doc.LockDocument())
+            using (var tr = Db.TransactionManager.StartTransaction())
+            {
+                if (tr.GetObject(id, OpenMode.ForWrite, false) is DBObject value && !value.IsErased) value.Erase();
+                tr.Commit();
+            }
+        }
+
         public static List<ObjectId> CreateModelSheets(
-            ObjectId sampleFrame, Extents3d? bd, Extents3d? td, Extents3d? tn,
-            int tdCount, int tnCount, bool mergeBdTd, bool verticalTn, bool rowLayout,
-            string layerName, double overlap, int sheetsPerRow, out string error)
+            ObjectId sampleFrame, Extents3d? bd, Extents3d? td, IList<Extents3d> tnItems,
+            int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn, bool rowLayout,
+            string layerName, double overlap, int sheetsPerRow, bool hideCopiedGeometry,
+            out int tdCreated, out string error)
         {
             error = null;
+            tdCreated = 0;
             var result = new List<ObjectId>();
             if (Db == null || !IsCurrentDatabase(sampleFrame))
             {
@@ -378,7 +611,7 @@ namespace GKIN
                 return result;
             }
 
-            var plans = BuildSheetPlans(bd, td, tn, tdCount, tnCount, mergeBdTd, verticalTn);
+            var plans = BuildSheetPlans(bd, td, tnItems, tdCount, tdLength, tdStep, mergeBdTd, verticalTn);
             if (plans.Count == 0)
             {
                 error = "Không tìm thấy vùng nguồn bình đồ, trắc dọc hoặc trắc ngang.";
@@ -395,6 +628,7 @@ namespace GKIN
                     var sample = (BlockReference)tr.GetObject(sampleFrame, OpenMode.ForRead);
                     ObjectId definitionId = sample.IsDynamicBlock ? sample.DynamicBlockTableRecord : sample.BlockTableRecord;
                     ObjectId layerId = EnsureLayer(layerName, tr);
+                    ObjectId hiddenLayerId = hideCopiedGeometry ? EnsureLayer("GKIN-NONPLOT", tr, false) : ObjectId.Null;
 
                     var sampleExt = sample.GeometricExtents;
                     double frameWidth = Math.Max(1.0, sampleExt.MaxPoint.X - sampleExt.MinPoint.X);
@@ -425,6 +659,7 @@ namespace GKIN
                         frame.TransformBy(Matrix3d.Displacement(targetMin - sampleExt.MinPoint));
                         AddAttributes(frame, sample, definitionId, tr);
                         result.Add(frame.ObjectId);
+                        if (plans[index].Type == "TD") tdCreated++;
 
                         Extents3d targetFrame = frame.GeometricExtents;
                         double usableWidth = frameWidth * 0.76;
@@ -432,7 +667,9 @@ namespace GKIN
                         double left = targetFrame.MinPoint.X + frameWidth * 0.04;
                         double bottom = targetFrame.MinPoint.Y + frameHeight * 0.06;
                         int windowCount = Math.Max(1, plans[index].Windows.Count);
-                        double targetRowHeight = usableHeight / windowCount;
+                        bool horizontal = plans[index].Type == "TN" && !plans[index].StackVertical && windowCount > 1;
+                        double targetWidth = horizontal ? usableWidth / windowCount : usableWidth;
+                        double targetHeight = horizontal ? usableHeight : usableHeight / windowCount;
 
                         for (int windowIndex = 0; windowIndex < plans[index].Windows.Count; windowIndex++)
                         {
@@ -445,9 +682,11 @@ namespace GKIN
                             }
                             double sourceWidth = Math.Max(1e-6, sourceWindow.MaxPoint.X - sourceWindow.MinPoint.X);
                             double sourceHeight = Math.Max(1e-6, sourceWindow.MaxPoint.Y - sourceWindow.MinPoint.Y);
-                            double scale = Math.Min(usableWidth / sourceWidth, targetRowHeight * 0.94 / sourceHeight);
+                            double scale = Math.Min(targetWidth * 0.94 / sourceWidth, targetHeight * 0.94 / sourceHeight);
                             var sourceCenter = new Point3d((sourceWindow.MinPoint.X + sourceWindow.MaxPoint.X) / 2.0, (sourceWindow.MinPoint.Y + sourceWindow.MaxPoint.Y) / 2.0, 0);
-                            var targetCenter = new Point3d(left + usableWidth / 2.0, bottom + targetRowHeight * (windowIndex + 0.5), 0);
+                            var targetCenter = horizontal
+                                ? new Point3d(left + targetWidth * (windowIndex + 0.5), bottom + usableHeight / 2.0, 0)
+                                : new Point3d(left + usableWidth / 2.0, bottom + targetHeight * (windowIndex + 0.5), 0);
                             var transform = Matrix3d.Displacement(targetCenter - Point3d.Origin)
                                 * Matrix3d.Scaling(scale, Point3d.Origin)
                                 * Matrix3d.Displacement(Point3d.Origin - sourceCenter);
@@ -460,6 +699,7 @@ namespace GKIN
                                 if (source is BlockReference block && string.Equals(EffectiveName(block), EffectiveName(sample), StringComparison.OrdinalIgnoreCase)) continue;
                                 if (source.Clone() is not Entity clone) continue;
                                 clone.TransformBy(transform);
+                                if (!hiddenLayerId.IsNull) clone.LayerId = hiddenLayerId;
                                 model.AppendEntity(clone);
                                 tr.AddNewlyCreatedDBObject(clone, true);
                             }
@@ -471,19 +711,30 @@ namespace GKIN
                 catch (System.Exception ex)
                 {
                     result.Clear();
+                    tdCreated = 0;
                     error = ex.Message;
                 }
             }
             return result;
         }
 
-        static ObjectId EnsureLayer(string requestedName, Transaction tr)
+        static ObjectId EnsureLayer(string requestedName, Transaction tr, bool? isPlottable = null)
         {
             string name = string.IsNullOrWhiteSpace(requestedName) ? "GKIN-KHUNG" : requestedName.Trim();
             var table = (LayerTable)tr.GetObject(Db.LayerTableId, OpenMode.ForRead);
-            if (table.Has(name)) return table[name];
+            if (table.Has(name))
+            {
+                ObjectId existingId = table[name];
+                if (isPlottable != null)
+                {
+                    var existing = (LayerTableRecord)tr.GetObject(existingId, OpenMode.ForWrite);
+                    existing.IsPlottable = isPlottable.Value;
+                }
+                return existingId;
+            }
             table.UpgradeOpen();
             var record = new LayerTableRecord { Name = name };
+            if (isPlottable != null) record.IsPlottable = isPlottable.Value;
             ObjectId id = table.Add(record);
             tr.AddNewlyCreatedDBObject(record, true);
             return id;
@@ -539,6 +790,10 @@ namespace GKIN
                                 frame.TransformBy(Matrix3d.Displacement(Point3d.Origin - ext.MinPoint));
                                 AddAttributes(frame, sample, definitionId, tr);
                                 ext = frame.GeometricExtents;
+                                using (var settings = BuildPlotSettings(layout, null,
+                                    new Extents2d(ext.MinPoint.X, ext.MinPoint.Y, ext.MaxPoint.X, ext.MaxPoint.Y),
+                                    "DWG To PDF.pc3", null))
+                                    layout.CopyFrom(settings);
                                 double width = Math.Max(1.0, ext.MaxPoint.X - ext.MinPoint.X);
                                 double height = Math.Max(1.0, ext.MaxPoint.Y - ext.MinPoint.Y);
                                 AddPaperText(paper, tr, page.title, new Point3d(width * 0.10, height * 0.76, 0), height * 0.045, width * 0.78);
@@ -595,8 +850,8 @@ namespace GKIN
         }
 
         public static List<LayoutSheetInfo> CreateLayouts(
-            ObjectId sampleFrame, Extents3d? bd, Extents3d? td, Extents3d? tn,
-            int tdCount, int tnCount, bool mergeBdTd, bool verticalTn, out string error)
+            ObjectId sampleFrame, Extents3d? bd, Extents3d? td, IList<Extents3d> tnItems,
+            int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn, out string error)
         {
             error = null;
             var result = new List<LayoutSheetInfo>();
@@ -606,7 +861,7 @@ namespace GKIN
                 return result;
             }
 
-            var plans = BuildSheetPlans(bd, td, tn, tdCount, tnCount, mergeBdTd, verticalTn);
+            var plans = BuildSheetPlans(bd, td, tnItems, tdCount, tdLength, tdStep, mergeBdTd, verticalTn);
             if (plans.Count == 0)
             {
                 error = "Không tìm thấy vùng nguồn BĐ/TĐ/TN để tạo Layout.";
@@ -620,81 +875,104 @@ namespace GKIN
                 {
                     foreach (var plan in plans)
                     {
-                        string layoutName = UniqueLayoutName($"GKIN-{plan.Type}-{Pad(plan.Index, 2)}");
-                        ObjectId layoutId = LayoutManager.Current.CreateLayout(layoutName);
-                        LayoutManager.Current.CurrentLayout = layoutName;
-                        using (var tr = Db.TransactionManager.StartTransaction())
+                        string layoutName = null;
+                        try
                         {
-                            var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForWrite);
-                            var paper = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForWrite);
-                            foreach (ObjectId id in paper)
+                            layoutName = UniqueLayoutName($"GKIN-{plan.Type}-{Pad(plan.Index, 2)}");
+                            ObjectId layoutId = LayoutManager.Current.CreateLayout(layoutName);
+                            LayoutManager.Current.CurrentLayout = layoutName;
+                            var viewportIds = new List<ObjectId>();
+                            ObjectId frameId;
+                            using (var tr = Db.TransactionManager.StartTransaction())
                             {
-                                if (tr.GetObject(id, OpenMode.ForWrite, false) is Viewport oldViewport
-                                    && oldViewport.Number > 1)
-                                    oldViewport.Erase();
-                            }
-
-                            var sample = (BlockReference)tr.GetObject(sampleFrame, OpenMode.ForRead);
-                            ObjectId definitionId = sample.IsDynamicBlock
-                                ? sample.DynamicBlockTableRecord
-                                : sample.BlockTableRecord;
-                            var frame = new BlockReference(Point3d.Origin, definitionId)
-                            {
-                                ScaleFactors = sample.ScaleFactors,
-                                Rotation = sample.Rotation
-                            };
-                            paper.AppendEntity(frame);
-                            tr.AddNewlyCreatedDBObject(frame, true);
-                            var frameExt = frame.GeometricExtents;
-                            frame.TransformBy(Matrix3d.Displacement(Point3d.Origin - frameExt.MinPoint));
-                            AddAttributes(frame, sample, definitionId, tr);
-                            frameExt = frame.GeometricExtents;
-
-                            double frameWidth = Math.Max(1.0, frameExt.MaxPoint.X - frameExt.MinPoint.X);
-                            double frameHeight = Math.Max(1.0, frameExt.MaxPoint.Y - frameExt.MinPoint.Y);
-                            double usableWidth = frameWidth * 0.76;
-                            double usableHeight = frameHeight * 0.88;
-                            double centerX = frameWidth * 0.04 + usableWidth / 2.0;
-                            double rowHeight = usableHeight / plan.Windows.Count;
-
-                            for (int i = 0; i < plan.Windows.Count; i++)
-                            {
-                                var source = Expand(plan.Windows[i], 0.03, 0.05);
-                                double viewportHeight = rowHeight * 0.94;
-                                double centerY = frameHeight * 0.06 + i * rowHeight + rowHeight / 2.0;
-                                var viewport = new Viewport
+                                var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForWrite);
+                                var paper = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForWrite);
+                                foreach (ObjectId id in paper)
                                 {
-                                    CenterPoint = new Point3d(centerX, centerY, 0),
-                                    Width = usableWidth,
-                                    Height = viewportHeight,
-                                    ViewCenter = Point2d.Origin,
-                                    ViewTarget = new Point3d(
-                                        (source.MinPoint.X + source.MaxPoint.X) / 2.0,
-                                        (source.MinPoint.Y + source.MaxPoint.Y) / 2.0,
-                                        (source.MinPoint.Z + source.MaxPoint.Z) / 2.0),
-                                    ViewDirection = Vector3d.ZAxis,
-                                    TwistAngle = 0
+                                    if (tr.GetObject(id, OpenMode.ForWrite, false) is Viewport oldViewport
+                                        && oldViewport.Number > 1)
+                                        oldViewport.Erase();
+                                }
+
+                                var sample = (BlockReference)tr.GetObject(sampleFrame, OpenMode.ForRead);
+                                ObjectId definitionId = sample.IsDynamicBlock
+                                    ? sample.DynamicBlockTableRecord
+                                    : sample.BlockTableRecord;
+                                var frame = new BlockReference(Point3d.Origin, definitionId)
+                                {
+                                    ScaleFactors = sample.ScaleFactors,
+                                    Rotation = sample.Rotation
                                 };
-                                double sourceWidth = Math.Max(1e-6, source.MaxPoint.X - source.MinPoint.X);
-                                double sourceHeight = Math.Max(1e-6, source.MaxPoint.Y - source.MinPoint.Y);
-                                viewport.ViewHeight = Math.Max(sourceHeight, sourceWidth / (usableWidth / viewportHeight)) * 1.03;
-                                paper.AppendEntity(viewport);
-                                tr.AddNewlyCreatedDBObject(viewport, true);
-                                viewport.On = true;
-                                viewport.Locked = true;
-                                viewport.UpdateDisplay();
+                                paper.AppendEntity(frame);
+                                tr.AddNewlyCreatedDBObject(frame, true);
+                                var frameExt = frame.GeometricExtents;
+                                frame.TransformBy(Matrix3d.Displacement(Point3d.Origin - frameExt.MinPoint));
+                                AddAttributes(frame, sample, definitionId, tr);
+                                frameExt = frame.GeometricExtents;
+                                frameId = frame.ObjectId;
+
+                                double frameWidth = Math.Max(1.0, frameExt.MaxPoint.X - frameExt.MinPoint.X);
+                                double frameHeight = Math.Max(1.0, frameExt.MaxPoint.Y - frameExt.MinPoint.Y);
+                                double usableWidth = frameWidth * 0.76;
+                                double usableHeight = frameHeight * 0.88;
+                                int windowCount = Math.Max(1, plan.Windows.Count);
+                                bool horizontal = plan.Type == "TN" && !plan.StackVertical && windowCount > 1;
+                                double viewportWidth = horizontal ? usableWidth / windowCount * 0.94 : usableWidth;
+                                double viewportHeight = horizontal ? usableHeight : usableHeight / windowCount * 0.94;
+
+                                for (int i = 0; i < plan.Windows.Count; i++)
+                                {
+                                    var source = Expand(plan.Windows[i], 0.03, 0.05);
+                                    double centerX = horizontal
+                                        ? frameWidth * 0.04 + usableWidth / windowCount * (i + 0.5)
+                                        : frameWidth * 0.04 + usableWidth / 2.0;
+                                    double centerY = horizontal
+                                        ? frameHeight * 0.06 + usableHeight / 2.0
+                                        : frameHeight * 0.06 + usableHeight / windowCount * (i + 0.5);
+                                    var viewport = new Viewport
+                                    {
+                                        CenterPoint = new Point3d(centerX, centerY, 0),
+                                        Width = viewportWidth,
+                                        Height = viewportHeight,
+                                        ViewCenter = Point2d.Origin,
+                                        ViewTarget = new Point3d(
+                                            (source.MinPoint.X + source.MaxPoint.X) / 2.0,
+                                            (source.MinPoint.Y + source.MaxPoint.Y) / 2.0,
+                                            (source.MinPoint.Z + source.MaxPoint.Z) / 2.0),
+                                        ViewDirection = Vector3d.ZAxis,
+                                        TwistAngle = 0
+                                    };
+                                    double sourceWidth = Math.Max(1e-6, source.MaxPoint.X - source.MinPoint.X);
+                                    double sourceHeight = Math.Max(1e-6, source.MaxPoint.Y - source.MinPoint.Y);
+                                    viewport.ViewHeight = Math.Max(sourceHeight, sourceWidth / (viewportWidth / viewportHeight)) * 1.03;
+                                    paper.AppendEntity(viewport);
+                                    tr.AddNewlyCreatedDBObject(viewport, true);
+                                    viewportIds.Add(viewport.ObjectId);
+                                }
+
+                                using (var settings = BuildPlotSettings(layout, null,
+                                    new Extents2d(frameExt.MinPoint.X, frameExt.MinPoint.Y, frameExt.MaxPoint.X, frameExt.MaxPoint.Y),
+                                    "DWG To PDF.pc3", null))
+                                    layout.CopyFrom(settings);
+                                tr.Commit();
                             }
 
-                            var sheet = new LayoutSheetInfo
+                            // A newly appended viewport must be committed before it is enabled and locked.
+                            LayoutManager.Current.CurrentLayout = layoutName;
+                            ActivateViewports(viewportIds, layoutName);
+                            result.Add(new LayoutSheetInfo
                             {
                                 LayoutName = layoutName,
                                 Type = plan.Type,
                                 Index = plan.Index,
                                 LayoutId = layoutId,
-                                FrameId = frame.ObjectId
-                            };
-                            tr.Commit();
-                            result.Add(sheet);
+                                FrameId = frameId
+                            });
+                        }
+                        catch (System.Exception ex)
+                        {
+                            error = $"{layoutName ?? plan.Type}: {ex.Message}";
+                            break;
                         }
                     }
                     Db.TransactionManager.QueueForGraphicsFlush();
@@ -712,15 +990,43 @@ namespace GKIN
             return result;
         }
 
-        static List<SheetPlan> BuildSheetPlans(Extents3d? bd, Extents3d? td, Extents3d? tn,
-            int tdCount, int tnCount, bool mergeBdTd, bool verticalTn)
+        static void ActivateViewports(IList<ObjectId> viewportIds, string layoutName)
+        {
+            void Activate()
+            {
+                using (var tr = Db.TransactionManager.StartTransaction())
+                {
+                    foreach (ObjectId id in viewportIds)
+                    {
+                        var viewport = (Viewport)tr.GetObject(id, OpenMode.ForWrite);
+                        viewport.On = true;
+                        viewport.Locked = true;
+                        viewport.UpdateDisplay();
+                    }
+                    tr.Commit();
+                }
+            }
+
+            try { Activate(); }
+            catch (Autodesk.AutoCAD.Runtime.Exception ex) when (ex.ErrorStatus == ErrorStatus.NotApplicable)
+            {
+                LayoutManager.Current.CurrentLayout = layoutName;
+                Ed.Regen();
+                Activate();
+            }
+        }
+
+        static List<SheetPlan> BuildSheetPlans(Extents3d? bd, Extents3d? td, IList<Extents3d> tnItems,
+            int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn)
         {
             var plans = new List<SheetPlan>();
             if (bd != null && !(mergeBdTd && td != null))
                 plans.Add(new SheetPlan { Type = "BD", Index = 1, Windows = new List<Extents3d> { bd.Value } });
             if (td != null)
             {
-                var windows = Split(td.Value, Math.Max(1, tdCount), false);
+                var windows = tdStep > 0 && tdLength > 0
+                    ? SplitByDistance(td.Value, tdLength, tdStep)
+                    : Split(td.Value, Math.Max(1, tdCount), false);
                 for (int i = 0; i < windows.Count; i++)
                 {
                     var plan = new SheetPlan { Type = "TD", Index = i + 1, Windows = new List<Extents3d> { windows[i] } };
@@ -728,13 +1034,36 @@ namespace GKIN
                     plans.Add(plan);
                 }
             }
-            if (tn != null)
+            if (tnItems != null && tnItems.Count > 0)
             {
-                var windows = Split(tn.Value, Math.Max(1, tnCount), verticalTn);
-                for (int i = 0; i < windows.Count; i++)
-                    plans.Add(new SheetPlan { Type = "TN", Index = i + 1, Windows = new List<Extents3d> { windows[i] } });
+                var ordered = verticalTn
+                    ? tnItems.OrderByDescending(x => x.MaxPoint.Y).ThenBy(x => x.MinPoint.X).ToList()
+                    : tnItems.OrderBy(x => x.MinPoint.X).ThenByDescending(x => x.MaxPoint.Y).ToList();
+                for (int i = 0; i < ordered.Count; i += 4)
+                    plans.Add(new SheetPlan
+                    {
+                        Type = "TN",
+                        Index = i / 4 + 1,
+                        StackVertical = verticalTn,
+                        Windows = ordered.Skip(i).Take(4).ToList()
+                    });
             }
             return plans;
+        }
+
+        static List<Extents3d> SplitByDistance(Extents3d source, double totalLength, double step)
+        {
+            var result = new List<Extents3d>();
+            int count = Math.Max(1, (int)Math.Ceiling(totalLength / step));
+            for (int i = 0; i < count; i++)
+            {
+                double t0 = Math.Min(1.0, i * step / totalLength);
+                double t1 = Math.Min(1.0, (i + 1) * step / totalLength);
+                result.Add(new Extents3d(
+                    new Point3d(source.MinPoint.X + (source.MaxPoint.X - source.MinPoint.X) * t0, source.MinPoint.Y, source.MinPoint.Z),
+                    new Point3d(source.MinPoint.X + (source.MaxPoint.X - source.MinPoint.X) * t1, source.MaxPoint.Y, source.MaxPoint.Z)));
+            }
+            return result;
         }
 
         static List<Extents3d> Split(Extents3d source, int count, bool vertical)
@@ -773,6 +1102,12 @@ namespace GKIN
                 if (tr.GetObject(id, OpenMode.ForRead) is AttributeReference sourceAttribute)
                     sampleValues[sourceAttribute.Tag] = sourceAttribute.TextString;
 
+            AddAttributes(frame, definitionId, sampleValues, tr);
+        }
+
+        static void AddAttributes(BlockReference frame, ObjectId definitionId,
+            IDictionary<string, string> sampleValues, Transaction tr)
+        {
             var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
             foreach (ObjectId id in definition)
             {
@@ -780,7 +1115,7 @@ namespace GKIN
                     || definitionAttribute.Constant) continue;
                 var attribute = new AttributeReference();
                 attribute.SetAttributeFromBlock(definitionAttribute, frame.BlockTransform);
-                attribute.TextString = sampleValues.TryGetValue(definitionAttribute.Tag, out string value)
+                attribute.TextString = sampleValues != null && sampleValues.TryGetValue(definitionAttribute.Tag, out string value)
                     ? value
                     : definitionAttribute.TextString;
                 frame.AttributeCollection.AppendAttribute(attribute);
@@ -868,51 +1203,86 @@ namespace GKIN
                 return false;
             }
             int pageIndex = -1;
-            string tempDirectory = null;
+            string fullPath = null;
             try
             {
-                string fullPath = Path.GetFullPath(file);
+                fullPath = Path.GetFullPath(file);
                 string outputDir = Path.GetDirectoryName(fullPath) ?? ".";
                 if (!string.IsNullOrEmpty(outputDir)) Directory.CreateDirectory(outputDir);
-                tempDirectory = Path.Combine(outputDir, ".gkin-plot-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(tempDirectory);
-                var pageFiles = new List<string>();
-                for (int i = 0; i < sheets.Count; i++)
+                if (File.Exists(fullPath)) File.Delete(fullPath);
+
+                using (Doc.LockDocument())
                 {
-                    pageIndex = i;
-                    string pageFile = Path.Combine(tempDirectory, $"page-{i + 1:0000}.pdf");
-                    var sheet = sheets[i];
-                    if (!PlotToFile(sheet.LayoutId, sheet.Window, pc3, sheet.Ctb, pageFile))
-                        throw new InvalidOperationException(LastError ?? "AutoCAD không tạo được trang PDF.");
-                    pageFiles.Add(pageFile);
+                    string originalLayout = LayoutManager.Current.CurrentLayout;
+                    var settingsToDispose = new List<PlotSettings>();
+                    try
+                    {
+                        if (PlotFactory.ProcessPlotState != ProcessPlotState.NotPlotting)
+                            throw new InvalidOperationException("AutoCAD đang có một tác vụ plot khác.");
+
+                        using (var tr = Db.TransactionManager.StartTransaction())
+                        {
+                            var infos = new List<PlotInfo>();
+                            foreach (var sheet in sheets)
+                            {
+                                pageIndex++;
+                                var layout = (Layout)tr.GetObject(sheet.LayoutId, OpenMode.ForRead);
+                                LayoutManager.Current.CurrentLayout = layout.LayoutName;
+                                Db.UpdateExt(true);
+                                Ed.Regen();
+                                var settings = BuildPlotSettings(layout, sheet.Window,
+                                    sheet.Window == null ? GetPaperBounds(layout, tr) : null, pc3, sheet.Ctb);
+                                settingsToDispose.Add(settings);
+                                var info = new PlotInfo { Layout = layout.ObjectId, OverrideSettings = settings };
+                                new PlotInfoValidator { MediaMatchingPolicy = MatchingPolicy.MatchEnabled }.Validate(info);
+                                infos.Add(info);
+                            }
+
+                            using (var engine = PlotFactory.CreatePublishEngine())
+                            {
+                                engine.BeginPlot(null, null);
+                                engine.BeginDocument(infos[0], Doc.Name, null, 1, true, fullPath);
+                                for (int i = 0; i < infos.Count; i++)
+                                {
+                                    pageIndex = i;
+                                    var page = new PlotPageInfo();
+                                    engine.BeginPage(page, infos[i], i == infos.Count - 1, null);
+                                    engine.BeginGenerateGraphics(null);
+                                    engine.EndGenerateGraphics(null);
+                                    engine.EndPage(null);
+                                }
+                                engine.EndDocument(null);
+                                engine.EndPlot(null);
+                            }
+                            tr.Commit();
+                        }
+                    }
+                    finally
+                    {
+                        foreach (var settings in settingsToDispose) settings.Dispose();
+                        try { LayoutManager.Current.CurrentLayout = originalLayout; }
+                        catch { }
+                    }
                 }
 
-                string mergedFile = Path.Combine(tempDirectory, "merged.pdf");
-                using (var output = new PdfDocument())
+                if (!File.Exists(fullPath) || new FileInfo(fullPath).Length == 0)
+                    throw new InvalidOperationException("AutoCAD không tạo được file PDF cuối.");
+                using (var pdf = PdfReader.Open(fullPath, PdfDocumentOpenMode.Import))
                 {
-                    foreach (string pageFile in pageFiles)
-                    using (var input = PdfReader.Open(pageFile, PdfDocumentOpenMode.Import))
-                        for (int page = 0; page < input.PageCount; page++) output.AddPage(input.Pages[page]);
-                    output.Save(mergedFile);
+                    if (pdf.PageCount != sheets.Count)
+                        throw new InvalidOperationException($"PDF có {pdf.PageCount} trang, cần {sheets.Count} trang.");
                 }
-                if (!File.Exists(mergedFile) || new FileInfo(mergedFile).Length == 0)
-                    throw new InvalidOperationException("File PDF sau khi ghép không hợp lệ.");
-                if (File.Exists(fullPath)) File.Delete(fullPath);
-                File.Move(mergedFile, fullPath);
                 return true;
             }
             catch (System.Exception ex)
             {
                 LastError = pageIndex >= 0 ? $"Tờ {pageIndex + 1}: {ex.Message}" : ex.Message;
-                return false;
-            }
-            finally
-            {
-                if (!string.IsNullOrEmpty(tempDirectory) && Directory.Exists(tempDirectory))
+                if (!string.IsNullOrWhiteSpace(fullPath) && File.Exists(fullPath))
                 {
-                    try { Directory.Delete(tempDirectory, true); }
+                    try { File.Delete(fullPath); }
                     catch { }
                 }
+                return false;
             }
         }
 
@@ -1009,8 +1379,9 @@ namespace GKIN
                         Math.Abs(paperBounds.Value.MaxPoint.X - paperBounds.Value.MinPoint.X),
                         Math.Abs(paperBounds.Value.MaxPoint.Y - paperBounds.Value.MinPoint.Y));
                 }
-                validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Layout);
+                validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Extents);
                 validator.SetStdScaleType(settings, StdScaleType.StdScale1To1);
+                validator.SetPlotCentered(settings, true);
             }
             if (!string.IsNullOrWhiteSpace(ctb)) validator.SetCurrentStyleSheet(settings, ctb);
             return settings;

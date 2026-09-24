@@ -1,46 +1,23 @@
-;;; GKIN.lsp — nạp GKIN.dll bằng APPLOAD
-;;; Đặt GKIN.lsp và GKIN.dll CÙNG THƯ MỤC.
+;;; GKIN.lsp — nạp GKIN.dll đúng một lần bằng APPLOAD.
+;;; Đặt GKIN.lsp, GKIN.dll và các DLL phụ thuộc trong cùng thư mục.
 (vl-load-com)
 
-(defun gkin:dll (/ f l)
-  (setq f (findfile "GKIN.dll"))
-  (if (and (null f) (setq l (findfile "GKIN.lsp")))
-    (setq f (findfile (strcat (vl-filename-directory l) "\\GKIN.dll"))))
-  f)
+;; Lưu đường dẫn ngay trong lúc APPLOAD; không tìm lại khi lệnh đã kết thúc.
+(setq *gkin-lsp-file* (findfile "GKIN.lsp"))
+(setq *gkin-lsp-dir*
+  (if *gkin-lsp-file* (vl-filename-directory *gkin-lsp-file*) nil))
+(setq *gkin-dll-file*
+  (if *gkin-lsp-dir* (strcat *gkin-lsp-dir* "\\GKIN.dll") nil))
 
-(defun gkin:cmd (args / r)
-  ;; COMMAND không phải first-class function trên một số bản AutoCAD.
-  ;; VL-CMDF có thể truyền an toàn vào VL-CATCH-ALL-APPLY.
-  (setq r (vl-catch-all-apply 'vl-cmdf args))
-  (if (vl-catch-all-error-p r)
-    (progn
-      (princ (strcat "\n[GKIN] Lỗi: " (vl-catch-all-error-message r)))
-      nil)
-    T))
+(defun gkin:command-available-p (/ value)
+  (setq value (vl-catch-all-apply 'getcname (list "GKIN")))
+  (and (not (vl-catch-all-error-p value)) value))
 
-(defun gkin:netload (f)
-  (gkin:cmd (list "_.NETLOAD" f)))
+(if (not (gkin:command-available-p))
+  (if (and *gkin-dll-file* (findfile *gkin-dll-file*))
+    (vl-catch-all-apply 'vl-cmdf (list "_.NETLOAD" *gkin-dll-file*))))
 
-(defun C:GKIN (/ f)
-  (setq f (gkin:dll))
-  (cond
-    ((null f)
-     (alert (strcat
-       "GKIN: không thấy GKIN.dll\n\n"
-       "Tải GKIN-APPLOAD.zip từ GitHub Releases\n"
-       "https://github.com/7xj1998-cell/GKIN-NET/releases\n"
-       "Giải nén GKIN.dll cạnh file GKIN.lsp này.")))
-    ((not (gkin:netload f))
-     (alert "GKIN: không nạp được GKIN.dll. Xem dòng lệnh để biết chi tiết."))
-    ((not (gkin:cmd (list "GKINUI")))
-     (alert "GKIN: DLL đã nạp nhưng không gọi được lệnh GKINUI.")))
-  (princ))
-
-(defun C:GKINDO ()
-  (if (and (gkin:dll) (gkin:netload (gkin:dll)))
-    (gkin:cmd (list "GKINDONET"))
-    (alert "GKIN: không nạp được GKIN.dll."))
-  (princ))
-
-(princ "\nGKIN.lsp đã nạp. Gõ GKIN để mở palette .NET (cần GKIN.dll).")
+(if (gkin:command-available-p)
+  (princ "\nGKIN đã nạp. Gõ GKIN để mở bảng.")
+  (princ "\nGKIN không nạp được. Kiểm tra GKIN.dll và các DLL phụ thuộc cùng thư mục."))
 (princ)

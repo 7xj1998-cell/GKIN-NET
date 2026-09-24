@@ -110,35 +110,4 @@ namespace GKIN
         }
     }
 
-    internal sealed class BrandRail : Control
-    {
-        public BrandRail()
-        {
-            Width = 34;
-            Dock = DockStyle.Left;
-            DoubleBuffered = true;
-            BackColor = Color.FromArgb(24, 35, 46);
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            e.Graphics.Clear(BackColor);
-            using var iconFont = new Font("Segoe UI Symbol", 8.5f, FontStyle.Bold);
-            using var textFont = new Font("Segoe UI", 7.5f, FontStyle.Regular);
-            using var iconBrush = new SolidBrush(Color.FromArgb(205, 215, 225));
-            using var textBrush = new SolidBrush(Color.FromArgb(188, 199, 211));
-            e.Graphics.DrawString("×", iconFont, iconBrush, 7, 2);
-            e.Graphics.DrawString("⌑", iconFont, iconBrush, 7, 20);
-            e.Graphics.DrawString("⚙", iconFont, iconBrush, 6, 38);
-            string text = "PXHS · XUẤT HỒ SƠ · PHƯỚC: 0919.50.47.87";
-            e.Graphics.TranslateTransform(Width / 2f, Height - 12f);
-            e.Graphics.RotateTransform(-90f);
-            e.Graphics.DrawString(text, textFont, textBrush, 0, -textFont.Height / 2f);
-            e.Graphics.ResetTransform();
-            using var badge = new SolidBrush(Color.FromArgb(230, 30, 96));
-            e.Graphics.FillRectangle(badge, Width / 2 - 6, Height - 16, 12, 13);
-            using var badgeFont = new Font("Segoe UI", 6.5f, FontStyle.Bold);
-            e.Graphics.DrawString("A", badgeFont, Brushes.White, Width / 2 - 4, Height - 16);
-        }
-    }
 }

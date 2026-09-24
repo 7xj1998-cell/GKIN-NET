@@ -1,5 +1,4 @@
 using Autodesk.AutoCAD.Runtime;
-using Autodesk.AutoCAD.ApplicationServices;
 
 [assembly: CommandClass(typeof(GKIN.Commands))]
 [assembly: ExtensionApplication(typeof(GKIN.Plugin))]
@@ -10,7 +9,7 @@ namespace GKIN
     {
         public void Initialize()
         {
-            // Defer WinForms/PaletteSet creation until GKINUI is invoked.
+            // Defer WinForms/PaletteSet creation until the user invokes GKIN.
             // This keeps NETLOAD safe in Core Console and during AutoCAD startup.
         }
 
@@ -22,16 +21,10 @@ namespace GKIN
 
     public class Commands
     {
-        [CommandMethod("GKINUI", CommandFlags.Session)]
+        [CommandMethod("GKIN", CommandFlags.Session)]
         public void ShowUi()
         {
             PaletteHost.Show();
-        }
-
-        [CommandMethod("GKINDONET", CommandFlags.Modal)]
-        public void Rescan()
-        {
-            PaletteHost.RescanFromCommand();
         }
     }
 }

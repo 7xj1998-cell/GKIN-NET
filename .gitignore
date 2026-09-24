@@ -11,4 +11,5 @@ tmp/
 tools/
 IRD_*.log
 plot.log
+*.log
 /GKIN-APPLOAD.zip
