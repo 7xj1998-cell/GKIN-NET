@@ -34,6 +34,10 @@ namespace GKIN
         int _tdN, _tnN, _modelTdSheets;
         bool _bdEstimated;
         bool _hasBd, _hasTd, _hasTn;
+        int _plannedTd;
+        bool _tdHeader;
+        List<RoadInteropService.Label> _drawingLabels;
+        readonly ComboBox cboProfile = NewCombo();
 
         readonly ComboBox cboKhung = NewCombo();
         readonly Label stKt = NewLbl("Chưa có", CLuc);
@@ -44,7 +48,7 @@ namespace GKIN
         readonly TextBox txtBdDai = NewTxt("2"), txtTnMoi = NewTxt("4");
         readonly ComboBox cboCat = NewCombo(), cboHuong = NewCombo(), cboXuat = NewCombo();
         readonly CheckBox chkBD = NewChk("Bình đồ", true), chkTD = NewChk("Trắc dọc", true), chkTN = NewChk("Trắc ngang", true);
-        readonly CheckBox chkGop = NewChk("Gộp bình đồ + trắc dọc", false), chkAn = NewChk("Không in hình sao chép", false);
+        readonly CheckBox chkGop = NewChk("Gộp bình đồ + trắc dọc", false), chkAn = NewChk("Không in hình nguồn đã ghép", false);
         readonly TextBox txtMau = NewTxt(""), txtChongMi = NewTxt("0"), txtLayer = NewTxt("GKIN-KHUNG"), txtBaiTo = NewTxt("4");
         readonly CheckBox chkChongMi = NewChk("Cộng chồng mí", false), chkBaiTo = NewChk("Giới hạn số tờ mỗi hàng", false);
 

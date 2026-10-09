@@ -7,8 +7,8 @@ namespace GKIN
 {
     public class Plugin : IExtensionApplication
     {
-        public void Initialize() { }
-        public void Terminate() { PaletteHost.Terminate(); }
+        public void Initialize() { DependencyResolver.Register(); }
+        public void Terminate() { DependencyResolver.Unregister(); PaletteHost.Terminate(); }
     }
 
     public class Commands

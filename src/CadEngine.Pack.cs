@@ -161,44 +161,21 @@ namespace GKIN
             double usableHeight = frameHeight * (1 - marginT - marginB);
             double left = frameExt.MinPoint.X + frameWidth * marginL;
             double bottom = frameExt.MinPoint.Y + frameHeight * marginB;
-            int windowCount = Math.Max(1, plan.Windows.Count);
-            int slots = Math.Max(plan.Slots, windowCount);
-            bool horizontal = !plan.StackVertical && windowCount > 1;
-            var weights = new double[windowCount];
-            double weightSum = 0;
-            for (int w = 0; w < windowCount; w++)
-            {
-                weights[w] = w < plan.Span.Count && plan.Span[w] > 1 ? plan.Span[w] : 1;
-                weightSum += weights[w];
-            }
-            if (weightSum < 1e-6) weightSum = windowCount;
-            double viewportWidth = usableWidth * 0.98;
-            double viewportHeight = horizontal
-                ? usableHeight * 0.96
-                : (plan.Type == "BD" ? usableHeight / slots : windowCount > 1 ? usableHeight / windowCount : usableHeight) * 0.94;
-            double usedHeight = horizontal ? viewportHeight : viewportHeight * windowCount;
-            double yBase = bottom + Math.Max(0, usableHeight - usedHeight) / 2.0;
 
             for (int i = 0; i < plan.Windows.Count; i++)
             {
                 var source = plan.Windows[i];
-                double thisW = horizontal ? usableWidth * 0.98 * weights[i] / weightSum : viewportWidth;
-                double xCursor = left;
-                if (horizontal)
-                    for (int w = 0; w < i; w++) xCursor += usableWidth * 0.98 * weights[w] / weightSum;
-                double centerX = horizontal ? xCursor + thisW / 2.0 : left + usableWidth / 2.0;
-                double centerY = horizontal
-                    ? yBase + viewportHeight / 2.0
-                    : yBase + viewportHeight * (windowCount - 1 - i) + viewportHeight / 2.0;
+                var placement = WindowPlacement(plan, i, left, bottom, usableWidth, usableHeight);
                 Point3d look = i < plan.Look.Count
                     ? plan.Look[i]
                     : new Point3d((source.MinPoint.X + source.MaxPoint.X) / 2.0, (source.MinPoint.Y + source.MaxPoint.Y) / 2.0, 0);
                 double twist = i < plan.Twist.Count ? plan.Twist[i] : 0;
                 double span = i < plan.Span.Count ? plan.Span[i] : 0;
                 var viewport = LayoutViewportService.Create(
-                    paper, tr, new Point3d(centerX, centerY, 0),
-                    horizontal ? thisW : viewportWidth, viewportHeight,
+                    paper, tr, placement.Center,
+                    placement.Width, placement.Height,
                     source, look, twist, span);
+                viewport.LayerId = EnsureLayer("GKIN-VPORT", tr, false);
                 viewportIds.Add(viewport.ObjectId);
             }
         }

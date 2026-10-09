@@ -32,6 +32,7 @@ namespace GKIN
         public int Index;
         public ObjectId LayoutId;
         public ObjectId FrameId;
+        public string Title;
     }
 
     public class PlotSheetRequest
@@ -44,6 +45,7 @@ namespace GKIN
 
     public static partial class CadEngine
     {
+        static CadEngine() { DependencyResolver.Register(); }
         sealed class SheetPlan
         {
             public string Type;
@@ -54,6 +56,8 @@ namespace GKIN
             public List<double> Twist = new List<double>();
             public List<Point3d> Look = new List<Point3d>();
             public List<double> Span = new List<double>();
+            public List<Extents2d> Regions = new List<Extents2d>();
+            public string StationTitle;
         }
 
         sealed class Strip
@@ -71,6 +75,8 @@ namespace GKIN
         public static Editor Ed => Doc?.Editor;
         public static Database Db => Doc?.Database;
         public static string LastError { get; private set; }
+        public static string DetectionNote { get; private set; }
+        public static List<Extents3d> ProfileCandidates { get; private set; } = new List<Extents3d>();
         public static List<ObjectId> LastFrames { get; private set; } = new List<ObjectId>();
         public static List<string> LastTypes { get; private set; } = new List<string>();
 
@@ -78,6 +84,7 @@ namespace GKIN
         {
             LastFrames = new List<ObjectId>();
             LastTypes = new List<string>();
+            LastTitles = new List<string>();
         }
 
         public static bool SameDatabase(Database first, Database second)
@@ -264,11 +271,6 @@ namespace GKIN
             return br.Name;
         }
 
-        sealed class PathSample
-        {
-            public List<Point3d> Points;
-            public double Length;
-        }
 
         static string RxName(DBObject obj)
         {
@@ -282,15 +284,6 @@ namespace GKIN
             catch { return obj.GetType().Name; }
         }
 
-        static bool TryLen(Curve curve, out double length)
-        {
-            try
-            {
-                length = Math.Abs(curve.GetDistanceAtParameter(curve.EndParam) - curve.GetDistanceAtParameter(curve.StartParam));
-                return length > 1;
-            }
-            catch { length = 0; return false; }
-        }
 
         static bool IsAlignment(Entity ent)
         {
@@ -305,17 +298,17 @@ namespace GKIN
                 && (ent is ProxyEntity || rx.Contains("ZOMBIE") || rx.Contains("PROXY"));
         }
 
-        static bool IsProfile(Entity ent)
+        static bool IsProfile(Entity ent, string originalLayer = null)
         {
-            string layer = (ent.Layer ?? "").ToUpperInvariant();
+            string layer = (originalLayer ?? ent.Layer ?? "").ToUpperInvariant();
             if (layer.Contains("PLINETNTN") || layer.Contains("TRACNGANG")) return false;
             return layer.Contains("PLINETDTN") || layer.Contains("PLINETD") || layer.Contains("TRACDOC")
                 || layer.Contains("PROFILE");
         }
 
-        static bool IsSection(Entity ent)
+        static bool IsSection(Entity ent, string originalLayer = null)
         {
-            string layer = (ent.Layer ?? "").ToUpperInvariant();
+            string layer = (originalLayer ?? ent.Layer ?? "").ToUpperInvariant();
             if (layer.Contains("PLINETDTN") || layer.Contains("PLINETD") || layer.Contains("TRACDOC") || layer == "TUYEN") return false;
             return HasXDataApp(ent, "KS_TN")
                 || layer.Contains("PLINETNTN") || layer.Contains("PLINETN") || layer.Contains("TRACNGANG")
@@ -342,192 +335,17 @@ namespace GKIN
 
         public static double MeasureLength(Entity ent)
         {
-            var sample = SampleEntity(ent);
-            return sample == null ? 0 : sample.Length;
+            try { using (var reference = RoadInteropService.ReadAlignment(ent)) return reference?.Length ?? 0; }
+            catch (Autodesk.AutoCAD.Runtime.Exception) { return 0; }
         }
 
         public static bool ExtentsOf(Entity entity, out Extents3d extents) => TryExtents(entity, out extents);
 
-        static PathSample SampleEntity(Entity ent)
-        {
-            if (ent is Curve curve && !(ent is Circle) && TryLen(curve, out double len))
-                return SampleCurve(curve, len);
-            DBObjectCollection bag = null;
-            try
-            {
-                bag = new DBObjectCollection();
-                ent.Explode(bag);
-            }
-            catch { bag = null; }
-            try
-            {
-                if (bag != null && bag.Count > 0)
-                {
-                    Curve longest = null;
-                    double longestLen = 0, sum = 0;
-                    var segs = new List<Point3d[]>();
-                    foreach (DBObject obj in bag)
-                    {
-                        if (obj is not Curve part || !TryLen(part, out double partLen)) continue;
-                        sum += partLen;
-                        if (partLen > longestLen) { longestLen = partLen; longest = part; }
-                        if (part is Line line) segs.Add(new[] { line.StartPoint, line.EndPoint });
-                        else if (part is Polyline pl)
-                        {
-                            var piece = new List<Point3d>();
-                            int n = pl.NumberOfVertices;
-                            for (int i = 0; i < n; i++) piece.Add(pl.GetPoint3dAt(i));
-                            if (piece.Count >= 2) segs.Add(piece.ToArray());
-                        }
-                    }
-                    if (longest != null && longestLen >= sum * 0.45) return SampleCurve(longest, longestLen);
-                    var chained = Chain(segs);
-                    if (chained != null && chained.Length >= longestLen) return chained;
-                    if (longest != null) return SampleCurve(longest, longestLen);
-                }
-            }
-            finally
-            {
-                if (bag != null)
-                    foreach (DBObject obj in bag)
-                        try { obj.Dispose(); } catch { }
-            }
-            try
-            {
-                var grips = new Point3dCollection();
-                ent.GetGripPoints(grips, new IntegerCollection(), new IntegerCollection());
-                if (grips.Count >= 2)
-                {
-                    var pts = new List<Point3d>();
-                    foreach (Point3d p in grips) pts.Add(p);
-                    return OrderPoints(pts);
-                }
-            }
-            catch { }
-            return null;
-        }
-
-        static PathSample SampleCurve(Curve curve, double length)
-        {
-            int n = Math.Max(16, (int)Math.Min(500, Math.Ceiling(length / 10.0)));
-            var pts = new List<Point3d>(n + 1);
-            for (int i = 0; i <= n; i++)
-            {
-                try { pts.Add(curve.GetPointAtDist(Math.Min(length, length * i / n))); }
-                catch { }
-            }
-            if (pts.Count < 2) return null;
-            return new PathSample { Points = pts, Length = length };
-        }
-
-        static PathSample Chain(List<Point3d[]> segs)
-        {
-            if (segs == null || segs.Count == 0) return null;
-            var used = new bool[segs.Count];
-            Point3d end = segs[0][segs[0].Length - 1];
-            int best = 0;
-            double bestDeg = double.MaxValue;
-            for (int i = 0; i < segs.Count; i++)
-            {
-                int deg = 0;
-                Point3d a = segs[i][0];
-                for (int j = 0; j < segs.Count; j++)
-                {
-                    if (i == j) continue;
-                    if (Near(a, segs[j][0], 0.5) || Near(a, segs[j][segs[j].Length - 1], 0.5)) deg++;
-                }
-                if (deg < bestDeg) { bestDeg = deg; best = i; end = a; }
-            }
-            var pts = new List<Point3d>();
-            for (int guard = 0; guard < segs.Count; guard++)
-            {
-                int pick = -1;
-                bool flip = false;
-                double pickDist = 2.0;
-                for (int i = 0; i < segs.Count; i++)
-                {
-                    if (used[i]) continue;
-                    double d0 = Dist2(end, segs[i][0]);
-                    double d1 = Dist2(end, segs[i][segs[i].Length - 1]);
-                    if (d0 <= d1 && d0 < pickDist) { pickDist = d0; pick = i; flip = false; }
-                    else if (d1 < pickDist) { pickDist = d1; pick = i; flip = true; }
-                }
-                if (pick < 0) break;
-                used[pick] = true;
-                var seg = segs[pick];
-                if (flip) Array.Reverse(seg);
-                if (pts.Count == 0) pts.Add(seg[0]);
-                for (int k = 1; k < seg.Length; k++) pts.Add(seg[k]);
-                end = pts[pts.Count - 1];
-            }
-            return pts.Count >= 2 ? Measure(pts) : null;
-        }
-
-        static PathSample OrderPoints(List<Point3d> pts)
-        {
-            if (pts.Count < 2) return null;
-            int start = 0;
-            double far = 0;
-            for (int i = 0; i < pts.Count; i++)
-            {
-                double d = Dist2(pts[i], pts[0]);
-                if (d > far) { far = d; start = i; }
-            }
-            var left = new List<Point3d>(pts);
-            var ordered = new List<Point3d> { left[start] };
-            left.RemoveAt(start);
-            while (left.Count > 0)
-            {
-                int near = 0;
-                double best = double.MaxValue;
-                Point3d tail = ordered[ordered.Count - 1];
-                for (int i = 0; i < left.Count; i++)
-                {
-                    double d = Dist2(tail, left[i]);
-                    if (d < best) { best = d; near = i; }
-                }
-                ordered.Add(left[near]);
-                left.RemoveAt(near);
-            }
-            return Measure(ordered);
-        }
-
-        static PathSample Measure(List<Point3d> pts)
-        {
-            double len = 0;
-            for (int i = 1; i < pts.Count; i++) len += Math.Sqrt(Dist2(pts[i - 1], pts[i]));
-            if (len < 1) return null;
-            return new PathSample { Points = pts, Length = len };
-        }
-
-        static bool Near(Point3d a, Point3d b, double tol) => Dist2(a, b) <= tol * tol;
-        static double Dist2(Point3d a, Point3d b)
-        {
-            double dx = a.X - b.X, dy = a.Y - b.Y;
-            return dx * dx + dy * dy;
-        }
-
-        static Point3d At(PathSample path, double dist)
-        {
-            var pts = path.Points;
-            if (dist <= 0) return pts[0];
-            double walked = 0;
-            for (int i = 1; i < pts.Count; i++)
-            {
-                double step = Math.Sqrt(Dist2(pts[i - 1], pts[i]));
-                if (walked + step >= dist || i == pts.Count - 1)
-                {
-                    double t = step < 1e-9 ? 0 : Math.Max(0, Math.Min(1, (dist - walked) / step));
-                    return new Point3d(pts[i - 1].X + (pts[i].X - pts[i - 1].X) * t, pts[i - 1].Y + (pts[i].Y - pts[i - 1].Y) * t, 0);
-                }
-                walked += step;
-            }
-            return pts[pts.Count - 1];
-        }
 
         public static bool QuetBinhDo(out ObjectId id, out double len, out bool estimated)
         {
             id = ObjectId.Null; len = 0; estimated = false;
+            DetectionNote = null;
             if (Db == null) return false;
             ObjectId alignId = ObjectId.Null, polyId = ObjectId.Null, fallbackId = ObjectId.Null;
             double alignLen = 0, polyLen = 0, fallbackLen = 0;
@@ -540,18 +358,18 @@ namespace GKIN
                 foreach (ObjectId eid in ms)
                 {
                     if (tr.GetObject(eid, OpenMode.ForRead, false) is not Entity ent) continue;
-                    string layer = (ent.Layer ?? "").ToUpperInvariant();
+                    string layer = SheetMetadataService.SourceLayer(ent, tr).ToUpperInvariant();
                     bool align = IsAlignment(ent);
                     bool onTim = layer.Contains("TIM") || layer == "TUYEN" || layer.Contains("CENTER");
                     if (!align && ent is not Polyline && ent is not Polyline2d && ent is not Polyline3d) continue;
-                    if (IsProfile(ent) || IsSection(ent)) continue;
-                    var sample = SampleEntity(ent);
-                    double d = sample == null ? 0 : sample.Length;
+                    if (IsProfile(ent, layer) || IsSection(ent, layer)) continue;
+                    double d = MeasureLength(ent);
                     bool guess = false;
-                    if (d < 1 && align && TryExtents(ent, out Extents3d ext))
+                    if (d < 1 && align && alignId.IsNull && TryExtents(ent, out _))
                     {
-                        d = Math.Sqrt(Math.Pow(ext.MaxPoint.X - ext.MinPoint.X, 2) + Math.Pow(ext.MaxPoint.Y - ext.MinPoint.Y, 2));
-                        guess = true;
+                        alignId = eid;
+                        alignGuess = true;
+                        DetectionNote = "Đã thấy tim TDT dạng proxy; mở bản vẽ bằng profile TDT/VNroad để đọc hình học tim và cọc.";
                     }
                     if (d < 1) continue;
                     if (d > fallbackLen && ent is Curve) { fallbackLen = d; fallbackId = eid; }
@@ -560,17 +378,23 @@ namespace GKIN
                 }
                 tr.Commit();
             }
-            if (!alignId.IsNull) { id = alignId; len = alignLen; estimated = alignGuess; return true; }
-            if (!polyId.IsNull) { id = polyId; len = polyLen; return true; }
+            if (!alignId.IsNull && alignLen > 0) { id = alignId; len = alignLen; estimated = alignGuess; DetectionNote = null; return true; }
+            if (!polyId.IsNull)
+            {
+                id = polyId; len = polyLen; estimated = !alignId.IsNull;
+                if (estimated) DetectionNote = "Đang dùng polyline tham chiếu vì tim TDT là proxy. Cần profile TDT/VNroad phù hợp và đủ nhãn cọc để ghép BĐ + TĐ khớp lý trình.";
+                else DetectionNote = null;
+                return true;
+            }
+            if (!alignId.IsNull) { id = alignId; estimated = true; return true; }
             if (!fallbackId.IsNull) { id = fallbackId; len = fallbackLen; estimated = true; return true; }
             return false;
         }
 
         public static int QuetTracDocKm(out Extents3d? source)
         {
-            int texts = 0, objects = 0;
             source = null;
-            Extents3d? profile = null;
+            ProfileCandidates = new List<Extents3d>();
             if (Db == null) return 0;
             using (Doc.LockDocument())
             using (var tr = Db.TransactionManager.StartTransaction())
@@ -578,37 +402,29 @@ namespace GKIN
                 var bt = (BlockTable)tr.GetObject(Db.BlockTableId, OpenMode.ForRead);
                 var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
                 var all = new List<Extents3d>();
+                var terrain = new List<Extents3d>();
+                var design = new List<Extents3d>();
                 foreach (ObjectId eid in ms)
                 {
                     var ent = tr.GetObject(eid, OpenMode.ForRead, false);
-                    if (ent is Entity entity && IsProfile(entity) && TryExtents(entity, out Extents3d profileExt))
+                    if (ent is not Entity entity) continue;
+                    string originalLayer = SheetMetadataService.SourceLayer(entity, tr);
+                    if (IsProfile(entity, originalLayer) && (entity is Curve || entity is ProxyEntity) && TryExtents(entity, out Extents3d profileExt))
                     {
-                        objects++;
-                        profile = Union(profile, profileExt);
+                        if (originalLayer.IndexOf("PLINETDTN", StringComparison.OrdinalIgnoreCase) >= 0) terrain.Add(profileExt);
+                        else design.Add(profileExt);
                     }
-                    if (ent is Entity drawn && TryExtents(drawn, out Extents3d ext)) all.Add(ext);
-                    string s = ent switch
-                    {
-                        DBText t => t.TextString,
-                        MText m => m.Contents,
-                        _ => null
-                    };
-                    if (s != null && StationRegex.IsMatch(s))
-                    {
-                        texts++;
-                        if (ent is Entity marker && TryExtents(marker, out Extents3d markerExt))
-                            source = Union(source, markerExt);
-                    }
+                    if (ent is Entity drawn && !IsAlignment(drawn) && TryExtents(drawn, out Extents3d ext)) all.Add(ext);
                 }
                 // TRACDOCTHIETKE/PLINETDTN are only the terrain/design curves.
                 // Grow from those stable VNroad layers to include the table,
                 // station labels and ordinates that belong to the same profile.
-                if (objects > 0) source = GrowToNearbyGeometry(profile, all, 0.06, 2.50) ?? profile;
-                else source = GrowToNearbyGeometry(source, all, 0.08, 2.50);
+                ProfileCandidates = RoadDrawingDetectionService.Profiles(terrain.Count > 0 ? terrain : MergeOverlapping(design), all);
+                if (ProfileCandidates.Count > 0) source = ProfileCandidates[0];
                 tr.Commit();
             }
             // The number of matching polylines is not the number of profiles.
-            return source != null ? 1 : texts;
+            return ProfileCandidates.Count;
         }
 
         public static int QuetTracNgang(out Extents3d? source, out List<Extents3d> items)
@@ -639,17 +455,19 @@ namespace GKIN
                             continue;
                         }
                     }
-                    if (hasExt && IsSection(entity)) parts.Add(ext);
+                    if (hasExt && IsSection(entity, SheetMetadataService.SourceLayer(entity, tr))) parts.Add(ext);
                 }
                 if (items.Count == 0 && markers.Count > 0)
                 {
                     // VNroad 7.1 writes KS_TN on the representative polyline of
                     // each cross-section.  Use it as the primary seed instead of
                     // guessing from every line on PLINETNTN.
-                    foreach (Extents3d marker in MergeOverlapping(markers))
-                        items.Add(GrowToNearbyGeometry(marker, all, 0.10, 0.60) ?? marker);
+                    items = RoadDrawingDetectionService.Sections(MergeOverlapping(markers), all);
                 }
-                else if (items.Count == 0 && parts.Count > 0) items = ClusterSections(parts);
+                else if (items.Count == 0 && parts.Count > 0)
+                {
+                    items = RoadDrawingDetectionService.Sections(MergeOverlapping(parts), all);
+                }
                 else
                 {
                     var grown = new List<Extents3d>();
@@ -670,10 +488,10 @@ namespace GKIN
             foreach (Extents3d value in values.OrderByDescending(x => x.MaxPoint.Y).ThenBy(x => x.MinPoint.X))
             {
                 int match = -1;
-                Extents3d probe = Expand(value, 0.02, 0.05);
+                Extents3d probe = Expand(value, 0.001, 0.005);
                 for (int i = 0; i < result.Count; i++)
                 {
-                    if (!Intersects2d(Expand(result[i], 0.02, 0.05), probe)) continue;
+                    if (!Intersects2d(Expand(result[i], 0.001, 0.005), probe)) continue;
                     match = i;
                     break;
                 }
@@ -683,87 +501,9 @@ namespace GKIN
             return result;
         }
 
-        static List<Extents3d> ClusterSections(List<Extents3d> raw)
-        {
-            if (raw.Count == 0) return raw;
-            Extents3d cloud = raw[0];
-            foreach (Extents3d ext in raw) cloud = Union(cloud, ext).Value;
-            double cloudW = Math.Max(1, cloud.MaxPoint.X - cloud.MinPoint.X);
-            double cloudH = Math.Max(1, cloud.MaxPoint.Y - cloud.MinPoint.Y);
-            var parts = raw.Where(ext => Width(ext) < cloudW * 0.55 && Height(ext) < cloudH * 0.55).ToList();
-            if (parts.Count == 0) parts = raw;
-            if (parts.Count == 1) return parts;
-            var sizes = parts.Select(ext => Math.Max(Width(ext), Height(ext))).Where(v => v > 0.01).ToList();
-            double unit = Math.Max(0.5, Median(sizes));
-            List<Extents3d> best = null;
-            int bestScore = int.MinValue;
-            foreach (double factor in new[] { 3.0, 6, 10, 16, 24, 36 })
-            {
-                var clusters = SplitGrid(parts, Math.Max(1, unit * factor));
-                if (clusters.Count == 0) continue;
-                double avg = parts.Count / (double)clusters.Count;
-                int score = Math.Min(clusters.Count, 120);
-                if (clusters.Count >= 2 && clusters.Count <= 400) score += 80;
-                if (avg >= 6) score += 40;
-                if (avg >= 15) score += 20;
-                if (score > bestScore) { bestScore = score; best = clusters; }
-            }
-            if (best == null || best.Count == 0)
-            {
-                best = new List<Extents3d>();
-                Extents3d one = parts[0];
-                foreach (Extents3d ext in parts) one = Union(one, ext).Value;
-                best.Add(one);
-            }
-            return best.Select(ext => Expand(ext, 0.06, 0.10)).ToList();
-        }
-
-        static List<Extents3d> SplitGrid(List<Extents3d> parts, double gap)
-        {
-            var yCuts = Cuts(parts.Select(ext => (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0).ToList(), gap);
-            var xCuts = Cuts(parts.Select(ext => (ext.MinPoint.X + ext.MaxPoint.X) / 2.0).ToList(), gap);
-            int rows = yCuts.Count + 1, cols = xCuts.Count + 1;
-            var bins = new Extents3d?[rows, cols];
-            var counts = new int[rows, cols];
-            foreach (Extents3d ext in parts)
-            {
-                int r = Band(yCuts, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0);
-                int c = Band(xCuts, (ext.MinPoint.X + ext.MaxPoint.X) / 2.0);
-                bins[r, c] = bins[r, c] == null ? ext : Union(bins[r, c], ext);
-                counts[r, c]++;
-            }
-            var result = new List<Extents3d>();
-            for (int r = 0; r < rows; r++)
-                for (int c = 0; c < cols; c++)
-                    if (counts[r, c] >= 4 && bins[r, c] != null) result.Add(bins[r, c].Value);
-            return result;
-        }
-
-        static List<double> Cuts(List<double> coords, double minGap)
-        {
-            var cuts = new List<double>();
-            if (coords.Count < 2) return cuts;
-            coords.Sort();
-            for (int i = 1; i < coords.Count; i++)
-                if (coords[i] - coords[i - 1] > minGap) cuts.Add((coords[i] + coords[i - 1]) / 2.0);
-            return cuts;
-        }
-
-        static int Band(List<double> cuts, double value)
-        {
-            int i = 0;
-            while (i < cuts.Count && value > cuts[i]) i++;
-            return i;
-        }
 
         static double Width(Extents3d ext) => Math.Abs(ext.MaxPoint.X - ext.MinPoint.X);
         static double Height(Extents3d ext) => Math.Abs(ext.MaxPoint.Y - ext.MinPoint.Y);
-        static double Median(List<double> values)
-        {
-            if (values.Count == 0) return 1;
-            values.Sort();
-            return values[values.Count / 2];
-        }
 
         public static List<LayoutSheetInfo> ScanLayoutSheets()
         {
@@ -796,19 +536,41 @@ namespace GKIN
                         frameId = entityId;
                     }
                     if (frameId.IsNull) continue;
+                    var selectedFrame = (Entity)tr.GetObject(frameId, OpenMode.ForRead);
+                    SheetMetadataService.TryRead(selectedFrame, tr, out _, out _, out string title);
                     result.Add(new LayoutSheetInfo
                     {
                         LayoutName = layout.LayoutName,
                         Type = match.Groups[1].Value.ToUpperInvariant(),
                         Index = int.Parse(match.Groups[2].Value),
                         LayoutId = entry.Value,
-                        FrameId = frameId
+                        FrameId = frameId,
+                        Title = title
                     });
                 }
                 tr.Commit();
             }
             int TypeOrder(string type) => type == "BD" ? 0 : type == "TD" ? 1 : 2;
             return result.OrderBy(x => TypeOrder(x.Type)).ThenBy(x => x.Index).ThenBy(x => x.LayoutName).ToList();
+        }
+
+        public static void ScanModelSheets()
+        {
+            ClearTransientSheets();
+            if (Db == null) return;
+            using (Doc.LockDocument())
+            using (var tr = Db.TransactionManager.StartOpenCloseTransaction())
+            {
+                var table = (BlockTable)tr.GetObject(Db.BlockTableId, OpenMode.ForRead);
+                var model = (BlockTableRecord)tr.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                var sheets = new List<(ObjectId Id, string Type, int Index, string Title)>();
+                foreach (ObjectId id in model)
+                    if (tr.GetObject(id, OpenMode.ForRead, false) is BlockReference frame
+                        && SheetMetadataService.TryRead(frame, tr, out string type, out int index, out string title))
+                        sheets.Add((id, type, index, title));
+                var sorted = sheets.OrderBy(x => x.Type == "BD" ? 0 : x.Type == "TD" ? 1 : 2).ThenBy(x => x.Index).ThenBy(x => x.Id.Handle.Value).ToList();
+                LastFrames = sorted.Select(x => x.Id).ToList(); LastTypes = sorted.Select(x => x.Type).ToList(); LastTitles = sorted.Select(x => x.Title).ToList();
+            }
         }
 
         static bool TryExtents(Entity entity, out Extents3d extents)
@@ -1185,6 +947,12 @@ namespace GKIN
                 return result;
             }
 
+            if (hideCopiedGeometry && ScanLayoutSheets().Count > 0)
+            {
+                error = "Layout GKIN đang dùng hình nguồn. Tắt 'Không in hình nguồn đã ghép' để giữ nội dung các viewport.";
+                return result;
+            }
+
             var plans = BuildSheetPlans(bdCurve, bd, td, tnItems, tdCount, tdLength, tdStep, mergeBdTd, verticalTn, bdPerSheet, tnPerSheet);
             if (plans.Count == 0)
             {
@@ -1222,6 +990,10 @@ namespace GKIN
                     double gapX = frameWidth * 0.10;
                     double gapY = frameHeight * 0.15;
                     string sampleName = EffectiveName(sample);
+                    // Snapshot source ids once. Generated windows from earlier
+                    // sheets must never become sources for later sheets.
+                    var originalIds = model.Cast<ObjectId>().Where(id => id != sampleFrame).ToList();
+                    var copiedSources = new HashSet<ObjectId>();
 
                     for (int index = 0; index < plans.Count; index++)
                     {
@@ -1238,6 +1010,7 @@ namespace GKIN
                         tr.AddNewlyCreatedDBObject(frame, true);
                         frame.TransformBy(Matrix3d.Displacement(targetMin - sampleExt.MinPoint));
                         AddAttributes(frame, sample, definitionId, tr);
+                        SheetMetadataService.Store(frame, tr, plans[index].Type, plans[index].Index, TitleOf(plans[index]));
                         result.Add(frame.ObjectId);
                         if (plans[index].Type == "TD") tdCreated++;
 
@@ -1247,9 +1020,6 @@ namespace GKIN
                         double left = targetFrame.MinPoint.X + frameWidth * 0.04;
                         double bottom = targetFrame.MinPoint.Y + frameHeight * 0.06;
                         int windowCount = Math.Max(1, plans[index].Windows.Count);
-                        bool horizontal = !plans[index].StackVertical && windowCount > 1;
-                        double targetWidth = horizontal ? usableWidth / windowCount : usableWidth;
-                        double targetHeight = horizontal ? usableHeight : usableHeight / windowCount;
 
                         for (int windowIndex = 0; windowIndex < plans[index].Windows.Count; windowIndex++)
                         {
@@ -1262,17 +1032,27 @@ namespace GKIN
                             }
                             double sourceWidth = Math.Max(1e-6, sourceWindow.MaxPoint.X - sourceWindow.MinPoint.X);
                             double sourceHeight = Math.Max(1e-6, sourceWindow.MaxPoint.Y - sourceWindow.MinPoint.Y);
-                            double scale = Math.Min(targetWidth * 0.94 / sourceWidth, targetHeight * 0.94 / sourceHeight);
-                            var sourceCenter = new Point3d((sourceWindow.MinPoint.X + sourceWindow.MaxPoint.X) / 2.0, (sourceWindow.MinPoint.Y + sourceWindow.MaxPoint.Y) / 2.0, 0);
-                            var targetCenter = horizontal
-                                ? new Point3d(left + targetWidth * (windowIndex + 0.5), bottom + usableHeight / 2.0, 0)
-                                : new Point3d(left + usableWidth / 2.0, bottom + targetHeight * (windowIndex + 0.5), 0);
+                            var region = PlanRegion(plans[index], windowIndex);
+                            var placement = WindowPlacement(plans[index], windowIndex, left, bottom, usableWidth, usableHeight);
+                            double targetWidth = placement.Width;
+                            double targetHeight = placement.Height;
+                            double twist = windowIndex < plans[index].Twist.Count ? plans[index].Twist[windowIndex] : 0;
+                            double span = windowIndex < plans[index].Span.Count ? plans[index].Span[windowIndex] : 0;
+                            var rotatedBounds = sourceWindow;
+                            rotatedBounds.TransformBy(Matrix3d.Rotation(twist, Vector3d.ZAxis, Point3d.Origin));
+                            sourceWidth = Math.Max(1e-6, Width(rotatedBounds)); sourceHeight = Math.Max(1e-6, Height(rotatedBounds));
+                            if (span > 0) sourceWidth = Math.Max(sourceWidth, span);
+                            double scale = placement.Scale;
+                            var sourceCenter = windowIndex < plans[index].Look.Count ? plans[index].Look[windowIndex]
+                                : new Point3d((sourceWindow.MinPoint.X + sourceWindow.MaxPoint.X) / 2.0, (sourceWindow.MinPoint.Y + sourceWindow.MaxPoint.Y) / 2.0, 0);
+                            var targetCenter = placement.Center;
                             var transform = Matrix3d.Displacement(targetCenter - Point3d.Origin)
                                 * Matrix3d.Scaling(scale, Point3d.Origin)
+                                * Matrix3d.Rotation(twist, Vector3d.ZAxis, Point3d.Origin)
                                 * Matrix3d.Displacement(Point3d.Origin - sourceCenter);
 
-                            var sourceIds = model.Cast<ObjectId>().ToList();
-                            foreach (ObjectId sourceId in sourceIds)
+                            var sources = new List<ObjectId>();
+                            foreach (ObjectId sourceId in originalIds)
                             {
                                 if (sourceId == sampleFrame || result.Contains(sourceId)) continue;
                                 try
@@ -1281,26 +1061,33 @@ namespace GKIN
                                     if (source is Viewport || source is AttributeDefinition) continue;
                                     if (source is BlockReference block)
                                     {
-                                        if (string.Equals(EffectiveName(block), sampleName, StringComparison.OrdinalIgnoreCase)) continue;
+                                        if (FramePriority(block, tr) > 0 || string.Equals(EffectiveName(block), sampleName, StringComparison.OrdinalIgnoreCase)) continue;
                                         var owner = (BlockTableRecord)tr.GetObject(block.BlockTableRecord, OpenMode.ForRead);
-                                        if (owner.IsFromExternalReference && (owner.Name ?? "").IndexOf('|') < 0) continue;
+                                        if ((owner.Name ?? "").StartsWith("GKIN-VIEW-", StringComparison.OrdinalIgnoreCase)) continue;
                                     }
-                                    if (source.Clone() is not Entity clone) continue;
-                                    clone.TransformBy(transform);
-                                    if (!hiddenLayerId.IsNull) clone.LayerId = hiddenLayerId;
-                                    model.AppendEntity(clone);
-                                    tr.AddNewlyCreatedDBObject(clone, true);
+                                    sources.Add(sourceId);
                                 }
                                 catch { skipped++; }
                             }
+                            var destination = new Extents2d(targetCenter.X - targetWidth * 0.5 - overlap * scale, targetCenter.Y - targetHeight * 0.5 - overlap * scale,
+                                targetCenter.X + targetWidth * 0.5 + overlap * scale, targetCenter.Y + targetHeight * 0.5 + overlap * scale);
+                            ObjectId windowId = ModelWindowService.Create(Db, tr, model, sources, transform, destination, layerId, sourceWindow);
+                            if (windowId.IsNull) throw new InvalidOperationException("Không có hình học nguồn trong vùng tờ " + (index + 1));
+                            foreach (ObjectId sourceId in sources) copiedSources.Add(sourceId);
                         }
                     }
+                    // Move ORIGINALS after all print copies have been produced.
+                    // The same transaction makes this action undoable.
+                    if (!hiddenLayerId.IsNull)
+                        foreach (ObjectId id in copiedSources)
+                            if (tr.GetObject(id, OpenMode.ForWrite, false) is Entity source) SheetMetadataService.HideSource(source, hiddenLayerId, tr);
                     tr.Commit();
                     Db.TransactionManager.QueueForGraphicsFlush();
                     if (skipped > 0)
                         error = "Đã bỏ qua " + skipped + " đối tượng không sao chép được (xref, viewport hoặc proxy).";
                     LastFrames = new List<ObjectId>(result);
                     LastTypes = plans.Take(result.Count).Select(p => p.Type).ToList();
+                    LastTitles = plans.Take(result.Count).Select(TitleOf).ToList();
                 }
                 catch (System.Exception ex)
                 {
@@ -1531,6 +1318,7 @@ namespace GKIN
             {
                 try
                 {
+                    AssertSourcesPrintable(plans);
                     foreach (var plan in plans)
                     {
                         string layoutName = null;
@@ -1571,42 +1359,10 @@ namespace GKIN
                                     frameExt = new Extents3d(Point3d.Origin, new Point3d(420, 297, 0));
                                 frameId = frame.ObjectId;
 
-                                double frameWidth = Math.Max(1.0, frameExt.MaxPoint.X - frameExt.MinPoint.X);
-                                double frameHeight = Math.Max(1.0, frameExt.MaxPoint.Y - frameExt.MinPoint.Y);
-                                double marginL = 0.03, marginR = 0.03, marginT = 0.04, marginB = 0.20;
-                                double usableWidth = frameWidth * (1 - marginL - marginR);
-                                double usableHeight = frameHeight * (1 - marginT - marginB);
-                                double left = frameExt.MinPoint.X + frameWidth * marginL;
-                                double bottom = frameExt.MinPoint.Y + frameHeight * marginB;
-                                int windowCount = Math.Max(1, plan.Windows.Count);
-                                int slots = Math.Max(plan.Slots, windowCount);
-                                bool horizontal = !plan.StackVertical && windowCount > 1;
-                                double viewportWidth = horizontal ? usableWidth / windowCount * 0.96 : usableWidth * 0.98;
-                                double viewportHeight = horizontal
-                                    ? usableHeight * 0.96
-                                    : (plan.Type == "BD" ? usableHeight / slots : windowCount > 1 ? usableHeight / windowCount : usableHeight) * 0.94;
-                                double usedHeight = horizontal ? viewportHeight : viewportHeight * windowCount;
-                                double yBase = bottom + Math.Max(0, usableHeight - usedHeight) / 2.0;
+                                SheetMetadataService.Store(frame, tr, plan.Type, plan.Index, TitleOf(plan));
 
-                                for (int i = 0; i < plan.Windows.Count; i++)
-                                {
-                                    var source = plan.Windows[i];
-                                    double centerX = horizontal
-                                        ? left + usableWidth / windowCount * (i + 0.5)
-                                        : left + usableWidth / 2.0;
-                                    double centerY = horizontal
-                                        ? yBase + viewportHeight / 2.0
-                                        : yBase + viewportHeight * (windowCount - 1 - i) + viewportHeight / 2.0;
-                                    Point3d look = i < plan.Look.Count
-                                        ? plan.Look[i]
-                                        : new Point3d((source.MinPoint.X + source.MaxPoint.X) / 2.0, (source.MinPoint.Y + source.MaxPoint.Y) / 2.0, 0);
-                                    double twist = i < plan.Twist.Count ? plan.Twist[i] : 0;
-                                    double span = i < plan.Span.Count ? plan.Span[i] : 0;
-                                    var viewport = LayoutViewportService.Create(
-                                        paper, tr, new Point3d(centerX, centerY, 0), viewportWidth, viewportHeight,
-                                        source, look, twist, span);
-                                    viewportIds.Add(viewport.ObjectId);
-                                }
+
+                                PlacePlanViewports(paper, tr, plan, frameExt, viewportIds);
 
                                 using (var settings = BuildPlotSettings(layout, null,
                                     new Extents2d(frameExt.MinPoint.X, frameExt.MinPoint.Y, frameExt.MaxPoint.X, frameExt.MaxPoint.Y),
@@ -1624,7 +1380,8 @@ namespace GKIN
                                 Type = plan.Type,
                                 Index = plan.Index,
                                 LayoutId = layoutId,
-                                FrameId = frameId
+                                FrameId = frameId,
+                                Title = TitleOf(plan)
                             });
                         }
                         catch (System.Exception ex)
@@ -1657,7 +1414,21 @@ namespace GKIN
             }
             LastFrames = result.Select(x => x.FrameId).ToList();
             LastTypes = result.Select(x => x.Type).ToList();
+            LastTitles = plans.Take(result.Count).Select(TitleOf).ToList();
             return result;
+        }
+
+        static void AssertSourcesPrintable(IList<SheetPlan> plans)
+        {
+            using (var tr = Db.TransactionManager.StartOpenCloseTransaction())
+            {
+                var table = (BlockTable)tr.GetObject(Db.BlockTableId, OpenMode.ForRead);
+                var model = (BlockTableRecord)tr.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                foreach (ObjectId id in model)
+                    if (tr.GetObject(id, OpenMode.ForRead, false) is Entity source && SheetMetadataService.IsHiddenSource(source, tr)
+                        && TryExtents(source, out Extents3d ext) && plans.Any(p => p.Windows.Any(w => Intersects2d(w, ext))))
+                        throw new InvalidOperationException("Hình nguồn đang ở layer không in. Undo hoặc khôi phục layer nguồn trước khi xuất Layout.");
+            }
         }
 
         static void ActivateViewports(IList<ObjectId> viewportIds, string layoutName)
@@ -1690,6 +1461,41 @@ namespace GKIN
             int tdCount, double tdLength, double tdStep, bool mergeBdTd, bool verticalTn, int bdPerSheet, int tnPerSheet)
         {
             var plans = new List<SheetPlan>();
+            List<RoadInteropService.Label> drawingLabels;
+            using (Doc.LockDocument())
+            using (var read = Db.TransactionManager.StartOpenCloseTransaction())
+                drawingLabels = RoadInteropService.ReadLabels(Db, read);
+            List<ProfileCutterService.Band> bands = td == null ? null
+                : ProfileCutterService.Cut(td.Value, tdLength, tdStep, Math.Max(1, tdCount), drawingLabels);
+            if (bd != null && td != null && mergeBdTd)
+            {
+                if (bands == null || bands.Any(x => !x.HasRealStations))
+                    throw new InvalidOperationException("Chưa đọc đủ lý trình trên trắc dọc để ghép đúng cọc. Hãy chọn trắc dọc có ít nhất hai nhãn Km.");
+                using (Doc.LockDocument())
+                using (var tr = Db.TransactionManager.StartOpenCloseTransaction())
+                using (var reference = bdCurve.IsNull ? null : RoadInteropService.ReadAlignment(tr.GetObject(bdCurve, OpenMode.ForRead) as Entity))
+                {
+                    if (reference == null)
+                        throw new InvalidOperationException("Chưa đọc được hình học tim. Mở bản vẽ bằng profile TDT/VNroad hoặc chọn polyline tim tham chiếu.");
+                    var anchors = RoadInteropService.RouteStations(reference, drawingLabels, Math.Max(MetersToDrawingUnits(30), reference.Length * 0.005));
+                    if (!RoadInteropService.MatchesRouteDistances(anchors))
+                        throw new InvalidOperationException("Cọc trên bình đồ chưa tạo được dãy lý trình liên tục; hãy chọn đúng tuyến hoặc kiểm tra nhãn cọc.");
+                    double lower = anchors.Min(x => x.Station), upper = anchors.Max(x => x.Station);
+                    foreach (var band in bands)
+                    {
+                        if (band.StartStation < lower - 0.01 || band.EndStation > upper + 0.01)
+                            throw new InvalidOperationException("Khoảng lý trình bình đồ không phủ hết trắc dọc; chưa thể ghép tờ khớp cọc.");
+                        double d0 = RoadInteropService.Interpolate(anchors, band.StartStation);
+                        double d1 = RoadInteropService.Interpolate(anchors, band.EndStation);
+                        var strip = AlignmentStrip(reference, d0, d1);
+                        var plan = new SheetPlan { Type = "TD", Index = plans.Count + 1,
+                            StationTitle = "BÌNH ĐỒ + TRẮC DỌC · " + band.From + " — " + band.To };
+                        AddPlanWindow(plan, strip.Ext, strip.Look, strip.Twist, strip.Span, Region(0, 0.52, 1, 1));
+                        AddBandWindows(plan, band.Windows, Region(0, 0, 1, 0.48));
+                        plans.Add(plan);
+                    }
+                }
+            }
             if (bd != null && !(mergeBdTd && td != null))
             {
                 var strips = CutAlignment(bdCurve, bd.Value, tdStep);
@@ -1707,9 +1513,8 @@ namespace GKIN
                     plans.Add(plan);
                 }
             }
-            if (td != null)
+            if (td != null && !(mergeBdTd && bd != null))
             {
-                var bands = ProfileCutterService.Cut(td.Value, tdLength, tdStep, Math.Max(1, tdCount));
                 for (int i = 0; i < bands.Count; i++)
                 {
                     var band = bands[i];
@@ -1718,117 +1523,147 @@ namespace GKIN
                         Type = "TD",
                         Index = i + 1,
                         StackVertical = false,
-                        Windows = new List<Extents3d>(band.Windows),
-                        Look = new List<Point3d>(band.Look),
-                        Span = new List<double>(band.Span),
-                        Twist = new List<double>(band.Twist),
+                        StationTitle = band.HasRealStations ? "TRẮC DỌC · " + band.From + " — " + band.To : null,
                         Slots = Math.Max(1, band.Windows.Count)
                     };
-                    if (mergeBdTd && bd != null && i == 0)
-                    {
-                        plan.Windows.Insert(0, bd.Value);
-                        plan.Look.Insert(0, new Point3d(
-                            (bd.Value.MinPoint.X + bd.Value.MaxPoint.X) / 2.0,
-                            (bd.Value.MinPoint.Y + bd.Value.MaxPoint.Y) / 2.0, 0));
-                        plan.Span.Insert(0, 0);
-                        plan.Twist.Insert(0, 0);
-                        plan.Slots = plan.Windows.Count;
-                    }
+                    AddBandWindows(plan, band.Windows, Region(0, 0, 1, 1));
                     plans.Add(plan);
                 }
             }
             if (tnItems != null && tnItems.Count > 0)
             {
-                int per = Math.Max(1, tnPerSheet);
+                int per = Math.Max(1, Math.Min(4, tnPerSheet));
+                double StationOf(Extents3d item)
+                {
+                    var stationLabel = drawingLabels.Where(x => x.Position.X >= item.MinPoint.X && x.Position.X <= item.MaxPoint.X
+                        && x.Position.Y >= item.MinPoint.Y && x.Position.Y <= item.MaxPoint.Y && RoadInteropService.TryStation(x.Text, out _))
+                        .OrderByDescending(x => x.Layer.IndexOf("DAUCO", StringComparison.OrdinalIgnoreCase) >= 0).FirstOrDefault();
+                    return stationLabel != null && RoadInteropService.TryStation(stationLabel.Text, out double value) ? value : double.MaxValue;
+                }
+                tnItems = tnItems.OrderBy(StationOf).ThenByDescending(x => x.MaxPoint.Y).ThenBy(x => x.MinPoint.X).ToList();
+                var ownHeaders = tnItems.Select(item => ProfileCutterService.FindHeader(item, drawingLabels)).ToList();
+                var headers = ownHeaders.Where(x => x != null).Select(x => x.Value).ToList();
                 foreach (var sheet in CrossSectionPackerService.Pack(tnItems, per, verticalTn))
-                    plans.Add(new SheetPlan
+                {
+                    var plan = new SheetPlan
                     {
                         Type = "TN",
                         Index = sheet.Index,
                         StackVertical = sheet.StackVertical,
                         Slots = per,
-                        Windows = sheet.Windows
-                    });
+                    };
+                    for (int i = 0; i < sheet.Windows.Count; i++)
+                    {
+                        var item = sheet.Windows[i];
+                        var cell = verticalTn ? Region(0, 1 - (i + 1.0) / per, 1, 1 - i / (double)per)
+                            : Region(i / (double)per, 0, (i + 1.0) / per, 1);
+                        var ownHeader = ProfileCutterService.FindHeader(item, drawingLabels);
+                        if (headers.Count > 0)
+                        {
+                            // Reuse the actual first table heading as its own
+                            // clipped window for every section lacking one.
+                            var header = ownHeader ?? headers.OrderBy(x => Math.Abs(Height(x) - Height(item))).First();
+                            if (ownHeader != null && header.MaxPoint.X > item.MinPoint.X && header.MaxPoint.X < item.MaxPoint.X)
+                                item = new Extents3d(new Point3d(header.MaxPoint.X, item.MinPoint.Y, 0), item.MaxPoint);
+                            AddBandWindows(plan, new List<Extents3d> { header, item }, cell);
+                        }
+                        else AddBandWindows(plan, new List<Extents3d> { item }, cell);
+                    }
+                    plans.Add(plan);
+                }
             }
             return plans;
         }
 
+        static Extents2d Region(double left, double bottom, double right, double top) => new Extents2d(left, bottom, right, top);
+
+        static void AddPlanWindow(SheetPlan plan, Extents3d source, Point3d look, double twist, double span, Extents2d region)
+        {
+            plan.Windows.Add(source); plan.Look.Add(look); plan.Twist.Add(twist); plan.Span.Add(span); plan.Regions.Add(region);
+        }
+
+        static void AddBandWindows(SheetPlan plan, IList<Extents3d> windows, Extents2d cell)
+        {
+            double total = windows.Sum(x => Math.Max(1e-6, Width(x)));
+            double cursor = cell.MinPoint.X;
+            foreach (var window in windows)
+            {
+                double width = (cell.MaxPoint.X - cell.MinPoint.X) * Math.Max(1e-6, Width(window)) / total;
+                AddPlanWindow(plan, window, new Point3d((window.MinPoint.X + window.MaxPoint.X) / 2,
+                    (window.MinPoint.Y + window.MaxPoint.Y) / 2, 0), 0, 0,
+                    Region(cursor, cell.MinPoint.Y, cursor + width, cell.MaxPoint.Y));
+                cursor += width;
+            }
+        }
+
+        static Extents2d PlanRegion(SheetPlan plan, int index)
+        {
+            if (plan.Regions.Count == plan.Windows.Count) return plan.Regions[index];
+            int count = Math.Max(1, plan.Windows.Count);
+            if (!plan.StackVertical) return Region(index / (double)count, 0, (index + 1.0) / count, 1);
+            int slots = Math.Max(count, plan.Slots);
+            return Region(0, 1 - (index + 1.0) / slots, 1, 1 - index / (double)slots);
+        }
+
+        static (double Width, double Height) SourceSize(SheetPlan plan, int index)
+        {
+            var source = plan.Windows[index];
+            var look = plan.Look[index];
+            var rotated = source;
+            rotated.TransformBy(Matrix3d.Rotation(plan.Twist[index], Vector3d.ZAxis, look));
+            return (Math.Max(plan.Span[index], 2 * Math.Max(Math.Abs(rotated.MinPoint.X - look.X), Math.Abs(rotated.MaxPoint.X - look.X))),
+                Math.Max(1e-6, 2 * Math.Max(Math.Abs(rotated.MinPoint.Y - look.Y), Math.Abs(rotated.MaxPoint.Y - look.Y))));
+        }
+
+        static (Point3d Center, double Width, double Height, double Scale) WindowPlacement(SheetPlan plan, int index,
+            double left, double bottom, double width, double height)
+        {
+            var cell = PlanRegion(plan, index);
+            var row = Enumerable.Range(0, plan.Windows.Count).Where(i =>
+                Math.Abs(PlanRegion(plan, i).MinPoint.Y - cell.MinPoint.Y) < 1e-6
+                && Math.Abs(PlanRegion(plan, i).MaxPoint.Y - cell.MaxPoint.Y) < 1e-6).ToList();
+            double x0 = row.Min(i => PlanRegion(plan, i).MinPoint.X), x1 = row.Max(i => PlanRegion(plan, i).MaxPoint.X);
+            double total = row.Sum(i => SourceSize(plan, i).Width), maxHeight = row.Max(i => SourceSize(plan, i).Height);
+            double scale = Math.Min(width * (x1 - x0) / Math.Max(1e-6, total), height * (cell.MaxPoint.Y - cell.MinPoint.Y) / maxHeight) * 0.96;
+            double cursor = left + width * (x0 + x1) / 2 - total * scale / 2;
+            foreach (int i in row)
+            {
+                var size = SourceSize(plan, i);
+                if (i == index) return (new Point3d(cursor + size.Width * scale / 2,
+                    bottom + height * (cell.MinPoint.Y + cell.MaxPoint.Y) / 2 - (maxHeight - size.Height) * scale / 2, 0), size.Width * scale, size.Height * scale, scale);
+                cursor += size.Width * scale;
+            }
+            throw new InvalidOperationException("Không tìm thấy vị trí cửa sổ tờ.");
+        }
+
+        static Strip AlignmentStrip(Polyline route, double start, double end)
+        {
+            start = Math.Max(0, Math.Min(route.Length, start)); end = Math.Max(0, Math.Min(route.Length, end));
+            Point3d a = route.GetPointAtDist(start), b = route.GetPointAtDist(end);
+            var ext = new Extents3d(a, a);
+            for (int i = 1; i <= 32; i++) ext.AddPoint(route.GetPointAtDist(start + (end - start) * i / 32));
+            double pad = Math.Max(MetersToDrawingUnits(15), Math.Abs(end - start) * 0.08);
+            return new Strip { Ext = new Extents3d(ext.MinPoint - new Vector3d(pad, pad, 0), ext.MaxPoint + new Vector3d(pad, pad, 0)),
+                Look = route.GetPointAtDist((start + end) / 2), Twist = -Math.Atan2(b.Y - a.Y, b.X - a.X),
+                Span = Math.Abs(end - start) + pad * 2 };
+        }
+
         static List<Strip> CutAlignment(ObjectId curveId, Extents3d full, double step)
         {
-            var whole = new Strip
+            if (!IsCurrentDatabase(curveId)) throw new InvalidOperationException("Chọn tim tuyến thuộc bản vẽ đang mở.");
+            using (var tr = Db.TransactionManager.StartOpenCloseTransaction())
+            using (var route = RoadInteropService.ReadAlignment(tr.GetObject(curveId, OpenMode.ForRead, false) as Entity))
             {
-                Ext = full,
-                Look = new Point3d((full.MinPoint.X + full.MaxPoint.X) / 2.0, (full.MinPoint.Y + full.MaxPoint.Y) / 2.0, 0),
-                Twist = 0,
-                Span = Math.Max(1, full.MaxPoint.X - full.MinPoint.X)
-            };
-            if (step <= 1 || curveId.IsNull || curveId.Database == null) return new List<Strip> { whole };
-            try
-            {
-                using (var tr = curveId.Database.TransactionManager.StartOpenCloseTransaction())
-                {
-                    if (tr.GetObject(curveId, OpenMode.ForRead, false) is not Entity ent) return new List<Strip> { whole };
-                    PathSample path = SampleEntity(ent);
-                    if (path == null || path.Length < 1 || path.Points == null || path.Points.Count < 2) return new List<Strip> { whole };
-                    double len = path.Length;
-                    var list = new List<Strip>();
-                    int count = Math.Max(1, (int)Math.Ceiling(len / step));
-                    for (int i = 0; i < count; i++)
-                    {
-                        double d0 = Math.Min(len, i * step);
-                        double d1 = Math.Min(len, (i + 1) * step);
-                        if (d1 - d0 < 1) continue;
-                        var p0 = At(path, d0);
-                        var p1 = At(path, d1);
-                        var mid = At(path, (d0 + d1) / 2.0);
-                        var ext = new Extents3d(p0, p0);
-                        for (int s = 0; s <= 8; s++)
-                            ext.AddPoint(At(path, Math.Min(len, d0 + (d1 - d0) * s / 8.0)));
-                        list.Add(new Strip
-                        {
-                            Ext = Expand(ext, 0.35, 0.35),
-                            Look = mid,
-                            Twist = -Math.Atan2(p1.Y - p0.Y, p1.X - p0.X),
-                            Span = Math.Max(1, (d1 - d0) * 1.06)
-                        });
-                    }
-                    return list.Count > 0 ? list : new List<Strip> { whole };
-                }
+                if (route == null || route.Length < 1e-6)
+                    throw new InvalidOperationException("Tim đang là proxy hoặc chưa đọc được hình học. Mở profile TDT/VNroad phù hợp hoặc chọn polyline tim.");
+                double length = route.Length;
+                if (step <= 1e-6) step = length;
+                int count = Math.Max(1, (int)Math.Ceiling(length / step));
+                var result = new List<Strip>();
+                for (int i = 0; i < count; i++)
+                    result.Add(AlignmentStrip(route, i * step, Math.Min(length, (i + 1) * step)));
+                return result;
             }
-            catch { return new List<Strip> { whole }; }
-        }
-
-        static List<Extents3d> SplitByDistance(Extents3d source, double totalLength, double step)
-        {
-            var result = new List<Extents3d>();
-            int count = Math.Max(1, (int)Math.Ceiling(totalLength / step));
-            for (int i = 0; i < count; i++)
-            {
-                double t0 = Math.Min(1.0, i * step / totalLength);
-                double t1 = Math.Min(1.0, (i + 1) * step / totalLength);
-                result.Add(new Extents3d(
-                    new Point3d(source.MinPoint.X + (source.MaxPoint.X - source.MinPoint.X) * t0, source.MinPoint.Y, source.MinPoint.Z),
-                    new Point3d(source.MinPoint.X + (source.MaxPoint.X - source.MinPoint.X) * t1, source.MaxPoint.Y, source.MaxPoint.Z)));
-            }
-            return result;
-        }
-
-        static List<Extents3d> Split(Extents3d source, int count, bool vertical)
-        {
-            var result = new List<Extents3d>();
-            for (int i = 0; i < count; i++)
-            {
-                double t0 = i / (double)count;
-                double t1 = (i + 1) / (double)count;
-                result.Add(vertical
-                    ? new Extents3d(
-                        new Point3d(source.MinPoint.X, source.MinPoint.Y + (source.MaxPoint.Y - source.MinPoint.Y) * t0, source.MinPoint.Z),
-                        new Point3d(source.MaxPoint.X, source.MinPoint.Y + (source.MaxPoint.Y - source.MinPoint.Y) * t1, source.MaxPoint.Z))
-                    : new Extents3d(
-                        new Point3d(source.MinPoint.X + (source.MaxPoint.X - source.MinPoint.X) * t0, source.MinPoint.Y, source.MinPoint.Z),
-                        new Point3d(source.MinPoint.X + (source.MaxPoint.X - source.MinPoint.X) * t1, source.MaxPoint.Y, source.MaxPoint.Z)));
-            }
-            return result;
         }
 
         static string UniqueLayoutName(string baseName)
@@ -1996,6 +1831,9 @@ namespace GKIN
                                 for (int i = 0; i < infos.Count; i++)
                                 {
                                     pageIndex = i;
+                                    var pageLayout = (Layout)tr.GetObject(sheets[i].LayoutId, OpenMode.ForRead);
+                                    LayoutManager.Current.CurrentLayout = pageLayout.LayoutName;
+                                    Ed.Regen();
                                     var page = new PlotPageInfo();
                                     engine.BeginPage(page, infos[i], i == infos.Count - 1, null);
                                     engine.BeginGenerateGraphics(null);
@@ -2117,8 +1955,8 @@ namespace GKIN
                 SelectBestMedia(settings, validator,
                     Math.Abs(window.Value.MaxPoint.X - window.Value.MinPoint.X),
                     Math.Abs(window.Value.MaxPoint.Y - window.Value.MinPoint.Y));
-                validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
                 validator.SetPlotWindowArea(settings, window.Value);
+                validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
                 validator.SetStdScaleType(settings, StdScaleType.StdScale1To1);
                 validator.SetPlotCentered(settings, true);
             }

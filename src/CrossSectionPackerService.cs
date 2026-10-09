@@ -23,10 +23,10 @@ namespace GKIN
         {
             var sheets = new List<Sheet>();
             if (items == null || items.Count == 0) return sheets;
-            var ordered = vertical
-                ? items.OrderByDescending(x => x.MaxPoint.Y).ThenBy(x => x.MinPoint.X).ToList()
-                : items.OrderBy(x => x.MinPoint.X).ThenByDescending(x => x.MaxPoint.Y).ToList();
-            int per = Math.Max(1, perSheet);
+            // Items are already ordered by stake/station when recognised.
+            // Output orientation changes placement, not the station order.
+            var ordered = items.ToList();
+            int per = Math.Max(1, Math.Min(4, perSheet));
             for (int i = 0; i < ordered.Count; i += per)
             {
                 sheets.Add(new Sheet

@@ -30,12 +30,17 @@ namespace GKIN
                 ViewDirection = Vector3d.ZAxis,
                 TwistAngle = twist
             };
-            double sourceWidth = Math.Max(1e-6, source.MaxPoint.X - source.MinPoint.X);
-            double sourceHeight = Math.Max(1e-6, source.MaxPoint.Y - source.MinPoint.Y);
-            double viewHeight = span > 1
-                ? span * viewport.Height / viewport.Width
-                : Math.Max(sourceHeight, sourceWidth / (viewport.Width / viewport.Height)) * 1.03;
-            viewport.ViewHeight = Math.Max(1e-6, viewHeight);
+            var rotated = source;
+            rotated.TransformBy(Matrix3d.Rotation(twist, Vector3d.ZAxis, look));
+            double sourceWidth = Math.Max(1e-6, 2 * Math.Max(Math.Abs(rotated.MaxPoint.X - look.X), Math.Abs(rotated.MinPoint.X - look.X)));
+            double sourceHeight = Math.Max(1e-6, 2 * Math.Max(Math.Abs(rotated.MaxPoint.Y - look.Y), Math.Abs(rotated.MinPoint.Y - look.Y)));
+            sourceWidth = Math.Max(sourceWidth, span);
+            double aspect = sourceWidth / sourceHeight;
+            // A tall paper cell must not expose neighbouring rows outside the
+            // source window. Fit the RECTANGLE too, not just its view scale.
+            viewport.Width = Math.Max(0.01, Math.Min(paperWidth, paperHeight * aspect));
+            viewport.Height = Math.Max(0.01, viewport.Width / aspect);
+            viewport.ViewHeight = sourceHeight;
             paper.AppendEntity(viewport);
             tr.AddNewlyCreatedDBObject(viewport, true);
             return viewport;

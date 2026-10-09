@@ -9,6 +9,7 @@ namespace GKIN
         static string TitleOf(SheetPlan plan)
         {
             if (plan == null) return "";
+            if (!string.IsNullOrEmpty(plan.StationTitle)) return plan.StationTitle;
             string kind = plan.Type == "BD" ? "BÌNH ĐỒ"
                 : plan.Type == "TD" ? "TRẮC DỌC TUYẾN"
                 : plan.Type == "TN" ? "TRẮC NGANG"
